@@ -4,23 +4,15 @@
 <meta http-equiv="Content-Type" content="text/html;charset=utf-8"/>
 <meta name="viewport" content="initial-scale=0.7"/>
 <style type="text/css">
-  body {background:#fff; color:#000; font-family: sans-serif, arial, helvetica; height:100vh}
-  div,p { margin:0; padding:0; border: 0 }
-  h1 {margin:0; border:0; padding:0}
-  hr { margin-top:0; }
-
-  .board { padding-top: 1ch; background:#eef; text-align:center; position:relative; text-wrap:nowrap }
-  .board > div   { position:relative; display:inline-block; vertical-align:top; border:solid 4px transparent}
-  .board > div > p { margin:0; padding:0 1ch 0 1ch; }
-  .board > div > p:nth-child(2)  { display:inline-block }
-  .board div > p:first-child { border: solid 4px grey ; border-radius:1em}
-
-  .board div.piece:not(:first-child, :last-child) > p:first-child:hover { border: solid 4px blue }
-  .board div.piece:not(:first-child, :last-child) > p:first-child:has(+p:hover) { border: solid 4px blue }
-
-  .board > div.piece:is(:last-child, :first-child) >p:nth-child(2)  { display: none }
-
-  .winner { margin:1em; background:#fee; text-align:center; display:none }
+  body {background:#fff; color:#000; height:100vs;  font-family:sans-serif,arial,helvetica}
+  div,p,h1 { margin:0; border:0; padding:0}
+  .board { padding: 1ch; background:#eef; text-align:center; text-wrap:nowrap }
+  .piece { position:relative; display:inline-block; vertical-align:top; margin-right:.5ch}
+  .piece p { padding:0 1ch 0 1ch; }
+  .piece > p:first-child { border: solid medium grey; border-radius:1em}
+  .piece:is(:last-child, :first-child) > p:nth-child(2)  { display: none }
+  .piece:not(:first-child, :last-child) > p:first-child:hover { border: solid medium blue }
+  .piece:not(:first-child, :last-child) > p:first-child:has(+p:hover) { border: solid medium blue }
 </style></head><body>
 
 <canvas id="animatedboxes" width="32" height="32"></canvas>
@@ -33,8 +25,9 @@
  <div class="piece"><p><span onclick="start()">START!</span></p><p>☝️</p></div>
 </div>
 
-<div class="winner">Winner Winner Chicken Dinner</div>
+<div id="winner" style="margin:1em; background:#fee; text-align:center; display:none">Winner Winner Chicken Dinner</div>
 
+<div id="coins" style="position:fixed; bottom:0ch; left:0ch; font-size:300%"></div>
 
 <script type="text/javascript">//<![CDATA[
 
@@ -48,26 +41,13 @@ var mute = false;
 var ctx = (window.AudioContext && new window.AudioContext()) ||
           (window.webkitAudioContext && new window.webkitAudioContext());
 
-function toggleAudio () {
-  event.target.innerText = (mute=!mute)?"🔇":"🔈";
-}
-
-function audioTick () {
-  if (!ctx || mute) { return; }
-  let osc = ctx.createOscillator();
-  let now = ctx.currentTime;
-
-  osc.frequency.value = 6000 + rnd(1000);
-  osc.type = "square";
-
-  let gain = ctx.createGain();
-  gain.gain.value = 0.5
-
-  gain.connect(ctx.destination);
-  osc.connect(gain);
-  osc.start(now);
-  osc.stop(now+.01);
-}
+var CreateAppendChild = function (tag, parent, text) {
+  let e = parent.appendChild(document.createElement(tag));
+  if (text != undefined) {
+    if (text===" ") { e.innerHTML="&nbsp;" } else { e.innerText=text }
+  }
+  return e;
+};
 
 /* Call fn periodically with args where args[0] specifies delay.
    Fn returns undefined (iteration stops) or an array of arguments to
@@ -91,6 +71,27 @@ function sweepMapRange(delay, from, inc, incFac, to, fn) {
       fn(from);
       return [delay, from+inc, inc*incFac, incFac, to, fn]
     }, delay, from, inc, incFac, to, fn)
+}
+
+function toggleAudio () {
+  event.target.innerText = (mute=!mute)?"🔇":"🔈";
+}
+
+function audioTick () {
+  if (!ctx || mute) { return; }
+  let osc = ctx.createOscillator();
+  let now = ctx.currentTime;
+
+  osc.frequency.value = 6000 + rnd(1000);
+  osc.type = "square";
+
+  let gain = ctx.createGain();
+  gain.gain.value = 0.5
+
+  gain.connect(ctx.destination);
+  osc.connect(gain);
+  osc.start(now);
+  osc.stop(now+.01);
 }
 
 /* Plot random colored boxes in a canvas periodically.
@@ -118,11 +119,11 @@ class GameBoard {
   piceLiftedLoc = [0,0];
 
   updateWinnerMarquee (state) {
-    $(".winner").style.display = state?"block":null;
+    $("#winner").style.display = state?"block":"none";
     return this;
   }
 
-  isWinner () { return $(".winner").style.display; }
+  isWinner () { return $("#winner").style.display=="block"; }
 
   isSolved () {
     let winner = true;
@@ -171,6 +172,7 @@ class GameBoard {
   handlerPieceMotionBegin (piece) {
     event.preventDefault();
     event.stopPropagation();
+    if (this.isWinner()) { return; }
     let touch = event.changedTouches ? event.changedTouches.item(0) : false;
     if (this.pieceLifted) { this.liftedStateReset(); }
     piece.style.zIndex = 1;
@@ -218,6 +220,7 @@ class GameBoard {
   handlerPieceMotionEnd () {
     if (this.pieceLifted) { this.liftedStateReset(); }
     if (this.isSolved() && !this.isWinner()) {
+      coinSplosion.start();
       this.updateWinnerMarquee(true)
       setTimeout(this.play.bind(this), 2000);
     }
@@ -255,6 +258,53 @@ class GameBoard {
   }
 
 } // gameBoard
+
+var coinSplosion = new class CoinSplosion {
+  gw = document.defaultView.innerWidth;
+  gh = document.defaultView.innerHeight;
+  coins=[];
+
+  /* Calculate next position object's state:  location is incremented
+     by velocity and velocity incremented by acceleration.
+  */
+  positionStateStep (pos) {
+    return [pos[0]+pos[2], pos[1]+pos[3], pos[2]+pos[4], pos[3]+pos[5], pos[4], pos[5]];
+  }
+
+  constructor () {
+    [
+     '💸','💴','💷','🤑','💲','💳','🪙','💰','💵','💶',
+     '💸','💴','💷','🤑','💲','💳','🪙','💰','💵','💶',
+     '💸','💴','💷','🤑','💲','💳','🪙','💰','💵','💶',
+     '💸','💴','💷','🤑','💲','💳','🪙','💰','💵','💶',
+     '💸','💴','💷','🤑','💲','💳','🪙','💰','💵','💶',
+     '💸','💴','💷','🤑','💲','💳','🪙','💰','💵','💶',
+    ].forEach( (c)=>{
+      let e = CreateAppendChild("b", $("#coins"), c);
+      e.style.position = "absolute";
+      this.coins.push([e, [0,0, 0,0, 0,0]]);
+    });
+  }
+
+  start () {
+    // Initialize coin state: [location, velocity, acceleration]
+    this.coins.forEach((coin)=>coin[1]= [0, 0, (20+rnd(100))/10000, (400+rnd(100))/10000, 0, -.001]);
+    // Animate the coins in a parabolic arc
+    setTimeoutLoop( (delay)=>{
+      let done = true;
+      this.coins.forEach( ([coin, pos], idx)=>{
+        if (0 <= pos[1]) { done=false; } // Keep going as long as a coin is visible
+        let posX = (floor(idx/10)%2) ? pos[0] : 1-pos[0]; // Move left or right
+        // Update element position
+        coin.style.left   = (posX*this.gw-coin.clientWidth)+"px";
+        coin.style.bottom = (pos[1]*this.gh-coin.clientHeight)+"px";
+        // Update position state
+        this.coins[idx][1] = this.positionStateStep(pos);
+      });
+      return done ? undefined : [delay];
+    }, 10);
+  }
+}
 
 function start () {
   let eStart = event.target
