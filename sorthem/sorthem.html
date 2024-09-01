@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en"><head>
+<title>Sorthem™</title>
+<meta http-equiv="Content-Type" content="text/html;charset=utf-8"/>
+<meta name="viewport" content="initial-scale=0.7"/>
+<style type="text/css">
+  body {background:#fff; color:#000; font-family: sans-serif, arial, helvetica; height:100vh}
+  h1 {margin:0; border:0; padding:0}
+  hr { margin-top:0; }
+
+  .board { padding-top: 1ch; background:#eef; text-align:center; position:relative; text-wrap:nowrap }
+  .board > div   { position:relative; display:inline-block; vertical-align:top; border:solid 4px transparent}
+  .board > div > p { margin:0; padding:0 1ch 0 1ch; }
+  .board > div > p:nth-child(2)  { display:inline-block }
+  .board div > p:first-child { border: solid 4px grey ; border-radius:1em}
+
+  .board div.piece:not(:first-child, :last-child) > p:first-child:hover { border: solid 4px blue }
+  .board div.piece:not(:first-child, :last-child) > p:first-child:has(+p:hover) { border: solid 4px darkblue }
+
+  .board > div.piece:is(:last-child, :first-child) >p:nth-child(2)  { display: none }
+
+  .winner { margin:1em; background:#fee; text-align:center; display:none }
+</style></head><body>
+
+<canvas id="animatedboxes" width="32" height="32"></canvas>
+<h1 style="display:inline-block">Sorthem™</h1>
+<i>Sort the numbers and win!</i>
+<hr/>
+
+<div id="board" class="board">
+ <div class="piece"><p>x</p><p>☝️</p></div>
+ <div class="piece"><p>x</p><p>☝️</p></div>
+ <div class="piece"><p>x</p><p>☝️</p></div>
+</div>
+
+ <div class="winner">Winner Winner Chicken Dinner</div>
+
+</div>
+
+<script type="text/javascript">//<![CDATA[
+
+const $ = (s)=>document.querySelector(s);
+const $$ = (s)=>[...document.querySelectorAll(s)];
+const log = console.log.bind(null);
+const floor = Math.floor;
+const rnd = (n)=>floor(Math.random()*n);
+const rgbstr = (r,g,b)=>`rgb(${r},${g},${b})`;
+
+/* Call fn periodically with args where args[0] specifies delay.
+   Fn returns undefined (iteration stops) or an array of arguments to
+   call fn with next.
+*/
+function setTimeoutLoop (fn, ...args) {
+  const nextArgs = fn(...args);
+  (undefined !== nextArgs) &&
+    setTimeout(setTimeoutLoop.bind(0, fn, ...nextArgs), nextArgs[0]);
+}
+
+/* Slowly (delay in milliseconds) call fn with values from..to
+*/
+function slowlyMapRange(delay, from, inc, to, fn) {
+  setTimeoutLoop( (delay, from, inc, to, fn)=>{
+      if ((0<inc && to<from) || (inc<0 && from<to)) return;
+      fn(from);
+      return [delay, from+inc, inc, to, fn]
+    }, delay, from, inc, to, fn)
+}
+
+/* Plot random colored boxes in a canvas periodically.
+*/
++function () {
+  let boxCount=4, loopDelay=200;
+  let canvas = $("#animatedboxes");
+  let ctx = canvas.getContext('2d');
+  let size = floor(canvas.width/boxCount);
+  setTimeoutLoop( (delay)=>(
+      ctx.fillStyle = rgbstr(rnd(256), rnd(256), rnd(256)),
+      ctx.fillRect(rnd(boxCount)*size, rnd(boxCount)*size, size, size),
+      [delay]
+    ),
+    loopDelay);
+}()
+
+////////////////////////////////////////
+
+var gameBoard = new class GameBoard {
+
+  board = $("#board");
+  pieces = board.children;
+
+  pieceLifted = null;
+  piceLiftedLoc = [0,0];
+
+  updateWinnerMarquee (state) {
+    $(".winner").style.display = state?"block":null;
+  }
+
+  isSolved () {
+    let winner = true;
+    let valueLast = -1;
+    [...this.pieces].forEach( (box)=>{
+      let value = parseInt(box.firstChild.innerText);
+      if (value < valueLast) { winner = false; }
+      valueLast = value;
+    });
+    this.updateWinnerMarquee(winner)
+    return winner;
+  }
+
+  // Add new piece by cloning the first one
+  addNewPiece () {
+    let piece = this.pieces[0];
+    piece.insertAdjacentElement('afterend', piece.cloneNode(true));
+    return this;
+  }
+
+  /* Randomize the piece values in the game board.
+     Moves the smallest/largest to the ends.
+  */
+  resetRandomValues () {
+    let min=10000, minElm;
+    let max=-1, maxElm;
+    let v;
+    [...this.pieces].forEach( (piece)=>{
+      v = piece.firstChild.innerText = rnd(10000);
+      if (v < min) { min=v; minElm=piece; }
+      if (max < v) { max=v; maxElm=piece; }
+    });
+    this.board.firstElementChild.insertAdjacentElement('beforebegin', minElm);
+    this.board.lastElementChild.insertAdjacentElement('afterend', maxElm);
+
+    // Try again if already sorted
+    return this.isSolved() && this.resetRandomValues() || this;
+  }
+
+  liftedStateReset () {
+    this.pieceLifted = 
+     this.pieceLifted.style.top =
+     this.pieceLifted.style.left =
+     this.pieceLifted.firstChild.style.backgroundColor = null;
+  }
+
+  handlerPieceMotionBegin (piece) {
+    let touch = event.changedTouches ? event.changedTouches.item(0) : false;
+    if (this.pieceLifted) { this.liftedStateReset(); }
+    piece.firstChild.style.backgroundColor="lightpink";
+    this.pieceLifted = piece;
+    this.piceLiftedLoc = [touch?touch.clientX:event.x, touch?touch.clientY:event.y];
+    return false; // same as event.preventDefault() event.stopPropagation();
+  }
+
+  handlerPieceMotion () {
+    if (!this.pieceLifted) { return false; } // Skip if not in a "lifting/moving piece" state
+
+    // Extract location from either touch or mouse event
+    const touch = event.changedTouches ? event.changedTouches.item(0) : false;
+    let nx = (touch?touch.clientX:event.x) - this.piceLiftedLoc[0];
+    let ny = (touch?touch.clientY:event.y) - this.piceLiftedLoc[1];
+
+    // Swap elements if lifted element moved left
+    const elmLeft = this.pieceLifted.previousElementSibling;
+    if (nx < -elmLeft.offsetWidth/2.0 && null != elmLeft.previousElementSibling) {
+      elmLeft.insertAdjacentElement("beforebegin", this.pieceLifted);
+      this.piceLiftedLoc[0] -= elmLeft.offsetWidth;
+      // DOM updated so recalculate lifted piece location
+      nx = (touch?touch.clientX:event.x) - this.piceLiftedLoc[0];
+      ny = (touch?touch.clientY:event.y) - this.piceLiftedLoc[1];
+      // Animate displaced piece to lifted piece's location
+      slowlyMapRange(10, -this.pieceLifted.offsetWidth, 2, 0, (v)=>elmLeft.style.left=`${v}px`);
+    }
+    // Swap elements if lifted element moved right
+    let elmRight = this.pieceLifted.nextElementSibling;
+    if (elmRight.offsetWidth/2.0 < nx && null != elmRight.nextElementSibling) {
+      elmRight.insertAdjacentElement("afterend", this.pieceLifted)
+      this.piceLiftedLoc[0] += elmRight.offsetWidth;
+      // DOM updated so recalculate lifted piece location
+      nx = (touch?touch.clientX:event.x) - this.piceLiftedLoc[0];
+      ny = (touch?touch.clientY:event.y) - this.piceLiftedLoc[1];
+      // Animate displaced piece to lifted piece's location
+      slowlyMapRange(10, this.pieceLifted.offsetWidth, -2, 0, (v)=>elmRight.style.left=`${v}px`);
+    }
+    this.pieceLifted.style.left = nx+"px";
+    this.pieceLifted.style.top = ny+"px";
+    return false;
+  }
+
+  handlerPieceMotionEnd () {
+    if (this.pieceLifted) { this.liftedStateReset(); }
+    if (this.isSolved()) { setTimeout(this.start.bind(this), 2000); }
+    return false;
+  }
+
+
+  setupHandlerPieceMotionBegin() {
+    [...this.pieces].forEach( (piece, idx)=>{
+      const isEndPiece = idx==0 || idx==this.pieces.length-1;
+      piece.onmousedown = isEndPiece ? null : this.handlerPieceMotionBegin.bind(this, piece);
+      piece.addEventListener("touchstart", piece.onmousedown);
+    });
+    return this;
+  }
+
+  setupHandlerPieceMotion() {
+    document.body.onmousemove = this.handlerPieceMotion.bind(this);
+    document.body.addEventListener("touchmove", document.body.onmousemove);
+    return this;
+  }
+  setupHandlerPieceMotionEnd() {
+    document.body.onmouseup = this.handlerPieceMotionEnd.bind(this);
+    document.body.addEventListener("touchend", document.body.onmouseup);
+    document.body.addEventListener("touchcancel", document.body.onmouseup);
+    return this;
+  }
+
+  constructor () {
+    this.setupHandlerPieceMotion().setupHandlerPieceMotionEnd();
+  }
+
+  start () {
+    this.addNewPiece().resetRandomValues().setupHandlerPieceMotionBegin();
+    return this;
+  }
+
+} // gameBoard
+
+
+window.onload = function () { gameBoard.start(); };
+
+//]]></script>
+</body>
+</html>
