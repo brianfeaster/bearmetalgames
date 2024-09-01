@@ -5,6 +5,7 @@
 <meta name="viewport" content="initial-scale=0.7"/>
 <style type="text/css">
   body {background:#fff; color:#000; font-family: sans-serif, arial, helvetica; height:100vh}
+  div,p { margin:0; padding:0; border: 0 }
   h1 {margin:0; border:0; padding:0}
   hr { margin-top:0; }
 
@@ -15,7 +16,7 @@
   .board div > p:first-child { border: solid 4px grey ; border-radius:1em}
 
   .board div.piece:not(:first-child, :last-child) > p:first-child:hover { border: solid 4px blue }
-  .board div.piece:not(:first-child, :last-child) > p:first-child:has(+p:hover) { border: solid 4px darkblue }
+  .board div.piece:not(:first-child, :last-child) > p:first-child:has(+p:hover) { border: solid 4px blue }
 
   .board > div.piece:is(:last-child, :first-child) >p:nth-child(2)  { display: none }
 
@@ -25,17 +26,15 @@
 <canvas id="animatedboxes" width="32" height="32"></canvas>
 <h1 style="display:inline-block">Sorthem™</h1>
 <i>Sort the numbers and win!</i>
+<p style="float:right" onclick="toggleAudio()">🔈</p>
 <hr/>
 
 <div id="board" class="board">
- <div class="piece"><p>x</p><p>☝️</p></div>
- <div class="piece"><p>x</p><p>☝️</p></div>
- <div class="piece"><p>x</p><p>☝️</p></div>
+ <div class="piece"><p><span onclick="start()">START!</span></p><p>☝️</p></div>
 </div>
 
- <div class="winner">Winner Winner Chicken Dinner</div>
+<div class="winner">Winner Winner Chicken Dinner</div>
 
-</div>
 
 <script type="text/javascript">//<![CDATA[
 
@@ -45,6 +44,30 @@ const log = console.log.bind(null);
 const floor = Math.floor;
 const rnd = (n)=>floor(Math.random()*n);
 const rgbstr = (r,g,b)=>`rgb(${r},${g},${b})`;
+var mute = false;
+var ctx = (window.AudioContext && new window.AudioContext()) ||
+          (window.webkitAudioContext && new window.webkitAudioContext());
+
+function toggleAudio () {
+  event.target.innerText = (mute=!mute)?"🔇":"🔈";
+}
+
+function audioTick () {
+  if (!ctx || mute) { return; }
+  let osc = ctx.createOscillator();
+  let now = ctx.currentTime;
+
+  osc.frequency.value = 6000 + rnd(1000);
+  osc.type = "square";
+
+  let gain = ctx.createGain();
+  gain.gain.value = 0.5
+
+  gain.connect(ctx.destination);
+  osc.connect(gain);
+  osc.start(now);
+  osc.stop(now+.01);
+}
 
 /* Call fn periodically with args where args[0] specifies delay.
    Fn returns undefined (iteration stops) or an array of arguments to
@@ -56,14 +79,18 @@ function setTimeoutLoop (fn, ...args) {
     setTimeout(setTimeoutLoop.bind(0, fn, ...nextArgs), nextArgs[0]);
 }
 
-/* Slowly (delay in milliseconds) call fn with values from..to
+/* Incrementally call fn with values from..to, delay in milliseconds.
 */
-function slowlyMapRange(delay, from, inc, to, fn) {
-  setTimeoutLoop( (delay, from, inc, to, fn)=>{
-      if ((0<inc && to<from) || (inc<0 && from<to)) return;
+function sweepMapRange(delay, from, inc, incFac, to, fn) {
+  audioTick();
+  setTimeoutLoop( (delay, from, inc, incFac, to, fn)=>{
+      if ((0<inc && to<from) || (inc<0 && from<to)) {
+        fn(to); // Snap to endpoint
+        return;
+      }
       fn(from);
-      return [delay, from+inc, inc, to, fn]
-    }, delay, from, inc, to, fn)
+      return [delay, from+inc, inc*incFac, incFac, to, fn]
+    }, delay, from, inc, incFac, to, fn)
 }
 
 /* Plot random colored boxes in a canvas periodically.
@@ -83,17 +110,19 @@ function slowlyMapRange(delay, from, inc, to, fn) {
 
 ////////////////////////////////////////
 
-var gameBoard = new class GameBoard {
+class GameBoard {
 
   board = $("#board");
   pieces = board.children;
-
   pieceLifted = null;
   piceLiftedLoc = [0,0];
 
   updateWinnerMarquee (state) {
     $(".winner").style.display = state?"block":null;
+    return this;
   }
+
+  isWinner () { return $(".winner").style.display; }
 
   isSolved () {
     let winner = true;
@@ -103,7 +132,6 @@ var gameBoard = new class GameBoard {
       if (value < valueLast) { winner = false; }
       valueLast = value;
     });
-    this.updateWinnerMarquee(winner)
     return winner;
   }
 
@@ -134,23 +162,25 @@ var gameBoard = new class GameBoard {
   }
 
   liftedStateReset () {
-    this.pieceLifted = 
+    this.pieceLifted =
      this.pieceLifted.style.top =
      this.pieceLifted.style.left =
      this.pieceLifted.firstChild.style.backgroundColor = null;
   }
 
   handlerPieceMotionBegin (piece) {
+    event.preventDefault();
+    event.stopPropagation();
     let touch = event.changedTouches ? event.changedTouches.item(0) : false;
     if (this.pieceLifted) { this.liftedStateReset(); }
     piece.firstChild.style.backgroundColor="lightpink";
     this.pieceLifted = piece;
     this.piceLiftedLoc = [touch?touch.clientX:event.x, touch?touch.clientY:event.y];
-    return false; // same as event.preventDefault() event.stopPropagation();
+    return true;
   }
 
   handlerPieceMotion () {
-    if (!this.pieceLifted) { return false; } // Skip if not in a "lifting/moving piece" state
+    if (!this.pieceLifted) { return true; } // Skip if not in a "lifting/moving piece" state
 
     // Extract location from either touch or mouse event
     const touch = event.changedTouches ? event.changedTouches.item(0) : false;
@@ -166,7 +196,7 @@ var gameBoard = new class GameBoard {
       nx = (touch?touch.clientX:event.x) - this.piceLiftedLoc[0];
       ny = (touch?touch.clientY:event.y) - this.piceLiftedLoc[1];
       // Animate displaced piece to lifted piece's location
-      slowlyMapRange(10, -this.pieceLifted.offsetWidth, 2, 0, (v)=>elmLeft.style.left=`${v}px`);
+      sweepMapRange(10, -this.pieceLifted.offsetWidth, 1, 1.3, 0, (v)=>elmLeft.style.left=`${v}px`);
     }
     // Swap elements if lifted element moved right
     let elmRight = this.pieceLifted.nextElementSibling;
@@ -177,19 +207,21 @@ var gameBoard = new class GameBoard {
       nx = (touch?touch.clientX:event.x) - this.piceLiftedLoc[0];
       ny = (touch?touch.clientY:event.y) - this.piceLiftedLoc[1];
       // Animate displaced piece to lifted piece's location
-      slowlyMapRange(10, this.pieceLifted.offsetWidth, -2, 0, (v)=>elmRight.style.left=`${v}px`);
+      sweepMapRange(10, this.pieceLifted.offsetWidth, -1, 1.3, 0, (v)=>elmRight.style.left=`${v}px`);
     }
     this.pieceLifted.style.left = nx+"px";
     this.pieceLifted.style.top = ny+"px";
-    return false;
+    return true;
   }
 
   handlerPieceMotionEnd () {
     if (this.pieceLifted) { this.liftedStateReset(); }
-    if (this.isSolved()) { setTimeout(this.start.bind(this), 2000); }
-    return false;
+    if (this.isSolved() && !this.isWinner()) {
+      this.updateWinnerMarquee(true)
+      setTimeout(this.play.bind(this), 2000);
+    }
+    return true;
   }
-
 
   setupHandlerPieceMotionBegin() {
     [...this.pieces].forEach( (piece, idx)=>{
@@ -216,15 +248,22 @@ var gameBoard = new class GameBoard {
     this.setupHandlerPieceMotion().setupHandlerPieceMotionEnd();
   }
 
-  start () {
-    this.addNewPiece().resetRandomValues().setupHandlerPieceMotionBegin();
+  play () {
+    this.updateWinnerMarquee(false).addNewPiece().resetRandomValues().setupHandlerPieceMotionBegin();
     return this;
   }
 
 } // gameBoard
 
-
-window.onload = function () { gameBoard.start(); };
+function start () {
+  let eStart = event.target
+  let piece = eStart.parentElement.parentElement;
+  eStart.remove();
+  // Start the board with 3 pieces
+  piece.insertAdjacentElement('afterend', piece.cloneNode(true));
+  piece.insertAdjacentElement('afterend', piece.cloneNode(true));
+  (new GameBoard).play();
+}
 
 //]]></script>
 </body>
