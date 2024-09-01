@@ -173,6 +173,7 @@ class GameBoard {
     event.stopPropagation();
     let touch = event.changedTouches ? event.changedTouches.item(0) : false;
     if (this.pieceLifted) { this.liftedStateReset(); }
+    piece.style.zIndex = 1;
     piece.firstChild.style.backgroundColor="lightpink";
     this.pieceLifted = piece;
     this.piceLiftedLoc = [touch?touch.clientX:event.x, touch?touch.clientY:event.y];
