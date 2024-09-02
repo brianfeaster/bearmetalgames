@@ -15,7 +15,7 @@
   .piece:not(:first-child, :last-child) > p:first-child:has(+p:hover) { border: solid medium blue }
 </style></head><body>
 
-<canvas id="animatedboxes" width="32" height="32"></canvas>
+<canvas id="animatedboxes" width="32" height="32" onclick="coinsplosion.start()"></canvas>
 <h1 style="display:inline-block">Sorthem™</h1>
 <i>Sort the numbers and win!</i>
 <p style="float:right" onclick="toggleAudio()">🔈</p>
@@ -220,7 +220,7 @@ class GameBoard {
   handlerPieceMotionEnd () {
     if (this.pieceLifted) { this.liftedStateReset(); }
     if (this.isSolved() && !this.isWinner()) {
-      coinSplosion.start();
+      coinsplosion.start();
       this.updateWinnerMarquee(true)
       setTimeout(this.play.bind(this), 2000);
     }
@@ -257,11 +257,11 @@ class GameBoard {
     return this;
   }
 
-} // gameBoard
+} // GameBoard
 
-var coinSplosion = new class CoinSplosion {
-  gw = document.defaultView.innerWidth;
-  gh = document.defaultView.innerHeight;
+
+var coinsplosion = new class CoinSplosion {
+
   coins=[];
 
   /* Calculate next position object's state:  location is incremented
@@ -277,8 +277,6 @@ var coinSplosion = new class CoinSplosion {
      '💸','💴','💷','🤑','💲','💳','🪙','💰','💵','💶',
      '💸','💴','💷','🤑','💲','💳','🪙','💰','💵','💶',
      '💸','💴','💷','🤑','💲','💳','🪙','💰','💵','💶',
-     '💸','💴','💷','🤑','💲','💳','🪙','💰','💵','💶',
-     '💸','💴','💷','🤑','💲','💳','🪙','💰','💵','💶',
     ].forEach( (c)=>{
       let e = CreateAppendChild("b", $("#coins"), c);
       e.style.position = "absolute";
@@ -286,25 +284,29 @@ var coinSplosion = new class CoinSplosion {
     });
   }
 
+  // Animate coins fullscreen in a parabolic arc
   start () {
+    let gw = document.defaultView.innerWidth;
+    let gh = document.defaultView.innerHeight;
     // Initialize coin state: [location, velocity, acceleration]
-    this.coins.forEach((coin)=>coin[1]= [0, 0, (20+rnd(100))/10000, (400+rnd(100))/10000, 0, -.001]);
-    // Animate the coins in a parabolic arc
+    this.coins.forEach((coin)=>coin[1] = [0, 0, (20+rnd(150))/5000, (300+rnd(200))/5000, 0, -.005]);
     setTimeoutLoop( (delay)=>{
       let done = true;
       this.coins.forEach( ([coin, pos], idx)=>{
         if (0 <= pos[1]) { done=false; } // Keep going as long as a coin is visible
-        let posX = (floor(idx/10)%2) ? pos[0] : 1-pos[0]; // Move left or right
+        let posX = (floor(idx/10)%2) ? pos[0] : 1-pos[0]; // Move left or right (every other set of 10)
         // Update element position
-        coin.style.left   = (posX*this.gw-coin.clientWidth)+"px";
-        coin.style.bottom = (pos[1]*this.gh-coin.clientHeight)+"px";
+        coin.style.left   = (posX  *gw - coin.clientWidth)+"px";
+        coin.style.bottom = (pos[1]*gh - coin.clientHeight)+"px";
         // Update position state
         this.coins[idx][1] = this.positionStateStep(pos);
       });
       return done ? undefined : [delay];
-    }, 10);
+    }, 50);
   }
-}
+
+} // CoinSplosion
+
 
 function start () {
   let eStart = event.target
@@ -315,6 +317,7 @@ function start () {
   piece.insertAdjacentElement('afterend', piece.cloneNode(true));
   (new GameBoard).play();
 }
+
 
 //]]></script>
 </body>
