@@ -2,47 +2,86 @@
 <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en"><head>
 <title>Sorthem™</title>
 <meta http-equiv="Content-Type" content="text/html;charset=utf-8"/>
-<meta name="viewport" content="initial-scale=0.7"/>
+<meta name="viewport" content="initial-scale=1.0"/>
 <style type="text/css">
-  body {background:#fff; color:#000; height:100vs;  font-family:sans-serif,arial,helvetica}
-  div,p,h1 { margin:0; border:0; padding:0}
-  .board { padding: 1ch; background:#eef; text-align:center; text-wrap:nowrap }
-  .piece { position:relative; display:inline-block; vertical-align:top; margin-right:.5ch}
-  .piece p { padding:0 1ch 0 1ch; }
-  .piece > p:first-child { border: solid medium grey; border-radius:1em}
-  .piece:is(:last-child, :first-child) > p:nth-child(2)  { display: none }
-  .piece:not(:first-child, :last-child) > p:first-child:hover { border: solid medium blue }
-  .piece:not(:first-child, :last-child) > p:first-child:has(+p:hover) { border: solid medium blue }
+  body {background:#fff; color:#000; height:100vh; font-family:sans-serif,arial,helvetica }
+  div,p,h1 { margin:0; border:0; padding:0 }
+  .shade { opacity:0.2 }
+  .board { padding: 1ch; background:#eee; text-align:center; position:relative }
+  .piece { _position:relative; display:inline-block; padding:0 .5ch 0 .5ch; border: solid medium grey; border-radius:1em; }
+  .piece:is(:last-child, :first-child) > p:nth-child(2) { display:none }
+  .piece:not(:first-child, :last-child) > p:first-child:hover { border:solid medium blue }
+  .piece:not(:first-child, :last-child) > p:first-child:has(+p:hover) { border:solid medium blue }
+  /*.piece:before { content:'-'; display:inline-block }*/
+  .cursor { position:absolute; background-color:lightpink; scale:70%; }
+
+  /*.piece::after, .piece::before {
+    font-family: 'Material Symbols Sharp';
+    font-size: 1.25em;
+    content: '';
+    width: 11px;
+    text-align: center;
+    border-bottom: 2px solid var(--col-dark);
+  }*/
+
 </style></head><body>
 
-<canvas id="animatedboxes" width="32" height="32" onclick="coinsplosion.start()"></canvas>
+<canvas id="animatedboxes" width="32" height="32" onclick="CoinSplosion.start()"></canvas>
 <h1 style="display:inline-block">Sorthem™</h1>
+
 <i>Sort the numbers and win!</i>
-<p style="float:right" onclick="toggleAudio()">🔈</p>
+
+<div style="position:fixed; top:0; right:0">
+ <b onclick="ehAddPiece()">➕</b>
+ <b onclick="ehToggleAudio()">🔈</b>
+ <b onclick="ehToggleAnimation()">🕺</b>
+</div>
+
 <hr/>
 
 <div id="board" class="board">
- <div class="piece"><p><span onclick="start()">START!</span></p><p>☝️</p></div>
+ <div class="piece"><span onclick="ehStartButton()">START!</span></div>
 </div>
-
 <div id="winner" style="margin:1em; background:#fee; text-align:center; display:none">Winner Winner Chicken Dinner</div>
 
 <div id="coins" style="position:fixed; bottom:0ch; left:0ch; font-size:300%"></div>
 
 <script type="text/javascript">//<![CDATA[
-
+"use strict";
 const $ = (s)=>document.querySelector(s);
 const $$ = (s)=>[...document.querySelectorAll(s)];
-const log = console.log.bind(null);
+const log = console.log.bind(console);
+const sqrt = Math.sqrt;
+const abs = Math.abs;
 const floor = Math.floor;
 const rnd = (n)=>floor(Math.random()*n);
+const min = Math.min
+const max = Math.max
+const dist = (a,b)=>abs(a-b);
 const rgbstr = (r,g,b)=>`rgb(${r},${g},${b})`;
+var animate = true;
 var mute = false;
 var ctx = (window.AudioContext && new window.AudioContext()) ||
           (window.webkitAudioContext && new window.webkitAudioContext());
 
 var CreateAppendChild = function (tag, parent, text) {
   let e = parent.appendChild(document.createElement(tag));
+  if (text != undefined) {
+    if (text===" ") { e.innerHTML="&nbsp;" } else { e.innerText=text }
+  }
+  return e;
+};
+
+var CreateAfterSibling = function (tag, sibling, text) {
+  let e = sibling.insertAdjacentElement('afterend', document.createElement(tag));
+  if (text != undefined) {
+    if (text===" ") { e.innerHTML="&nbsp;" } else { e.innerText=text }
+  }
+  return e;
+};
+
+var CreateBeforeSibling = function (tag, sibling, text) {
+  let e = sibling.insertAdjacentElement('beforebegin', document.createElement(tag));
   if (text != undefined) {
     if (text===" ") { e.innerHTML="&nbsp;" } else { e.innerText=text }
   }
@@ -62,7 +101,6 @@ function setTimeoutLoop (fn, ...args) {
 /* Incrementally call fn with values from..to, delay in milliseconds.
 */
 function sweepMapRange(delay, from, inc, incFac, to, fn) {
-  audioTick();
   setTimeoutLoop( (delay, from, inc, incFac, to, fn)=>{
       if ((0<inc && to<from) || (inc<0 && from<to)) {
         fn(to); // Snap to endpoint
@@ -73,8 +111,14 @@ function sweepMapRange(delay, from, inc, incFac, to, fn) {
     }, delay, from, inc, incFac, to, fn)
 }
 
-function toggleAudio () {
+function ehAddPiece () {
+  gameBoard && gameBoard.play();
+}
+function ehToggleAudio () {
   event.target.innerText = (mute=!mute)?"🔇":"🔈";
+}
+function ehToggleAnimation () {
+  event.target.innerText = (animate=!animate)?"🕺":"🧍";
 }
 
 function audioTick () {
@@ -114,9 +158,42 @@ function audioTick () {
 class GameBoard {
 
   board = $("#board");
-  pieces = board.children;
-  pieceLifted = null;
-  piceLiftedLoc = [0,0];
+
+  pieceMoving = null;
+  pieceMovingSibling = null;
+  pieceMovingOrigin = {x:0, y:0};
+
+  pieceCursor = null;
+  pieceCursorOrigin = {x:0, y:0};
+
+  rows = [[]];
+  rowsYOffset = [];
+  rowsHeights = [];
+  rowsLeftPads = []
+
+  pieces () {
+    return [...board.children].filter( (el)=>!el.classList.contains("cursor") );
+  }
+
+  elementDetails (e) {
+    const w = e.offsetWidth;
+    const h = e.offsetHeight;
+    const wc = floor(w/2);
+    const hc = floor(h/2);
+    const x = e.offsetLeft;
+    const y = e.offsetTop;
+    return { w:w, h:h, wc:wc, hc:hc, x:x, y:y, xc:x+wc, yc:y+hc };
+  }
+
+  delta (a, b) { return { x:b.x-a.x, y:b.y-a.y }; }
+
+  // Extract "pointer" location from either touch or mouse event
+  pointerDetails (event) {
+    const touch = event.changedTouches ? event.changedTouches.item(0) : false;
+    const x = touch ? touch.clientX : event.x;
+    const y = touch ? touch.clientY : event.y;
+    return { x:x, y:y }
+  }
 
   updateWinnerMarquee (state) {
     $("#winner").style.display = state?"block":"none";
@@ -128,8 +205,8 @@ class GameBoard {
   isSolved () {
     let winner = true;
     let valueLast = -1;
-    [...this.pieces].forEach( (box)=>{
-      let value = parseInt(box.firstChild.innerText);
+    [...this.pieces()].forEach( (box)=>{
+      let value = parseInt(box.innerText)||-1;
       if (value < valueLast) { winner = false; }
       valueLast = value;
     });
@@ -138,7 +215,7 @@ class GameBoard {
 
   // Add new piece by cloning the first one
   addNewPiece () {
-    let piece = this.pieces[0];
+    let piece = this.pieces()[0];
     piece.insertAdjacentElement('afterend', piece.cloneNode(true));
     return this;
   }
@@ -149,87 +226,204 @@ class GameBoard {
   resetRandomValues () {
     let min=10000, minElm;
     let max=-1, maxElm;
-    let v;
-    [...this.pieces].forEach( (piece)=>{
-      v = piece.firstChild.innerText = rnd(10000);
+    const len = this.pieces().length;
+    [...this.pieces()].forEach( (piece, i)=>{
+      const v = 10**(len-i-2);
+      piece.innerText = v==.1 ? 0 : v;
       if (v < min) { min=v; minElm=piece; }
       if (max < v) { max=v; maxElm=piece; }
     });
     this.board.firstElementChild.insertAdjacentElement('beforebegin', minElm);
     this.board.lastElementChild.insertAdjacentElement('afterend', maxElm);
 
-    // Try again if already sorted
+    // Repeat this process if it happened to generated an already sorted arrangement.
     return this.isSolved() && this.resetRandomValues() || this;
   }
 
-  liftedStateReset () {
-    this.pieceLifted =
-     this.pieceLifted.style.top =
-     this.pieceLifted.style.left =
-     this.pieceLifted.firstChild.style.backgroundColor = null;
+  lockPiecesPositions () {
+    [...this.pieces()]
+      .map((piece)=>[piece, piece.offsetLeft+"px", piece.offsetTop+"px"])
+      .forEach(([piece, left, top])=>{
+         piece.style.position="absolute";
+         piece.style.left = left;
+         piece.style.top = top;
+      });
+
+    this.rows = []; // array of rows of pieces
+    let topOffset = -1;
+
+    // Collect the pieces into rows
+    this.pieces().map((el)=>{
+      if (topOffset != el.offsetTop) {
+        topOffset = el.offsetTop;
+        this.rows.push([]);
+      }
+      this.rows[this.rows.length-1].push(el);
+    });
+
+    this.rowsYOffset = this.rows.map( (row)=>row[0].offsetTop );
+    this.rowsHeights = this.rows.map( (row)=>row[0].offsetHeight );
+    this.rowsLeftPads = this.rows.map( (row)=>row[0].offsetLeft );
+  }
+
+  unlockPiecesPositions () {
+    [...this.pieces()].forEach((piece)=>piece.style.position=null);
+  }
+
+  resetMovePieceSatate () {
+    if (this.pieceMoving) {
+      this.pieceMoving.classList.remove('shade');
+      this.pieceMoving = null;
+      this.pieceMovingSibling = null;
+    }
+    if (this.pieceCursor) {
+      this.pieceCursor.remove();
+      this.pieceCursor = null;
+    }
+    this.unlockPiecesPositions();
+  }
+
+  createMouseCursorFrom (el) {
+    this.pieceCursor = el.cloneNode(true);
+    this.pieceCursorOrigin.x = el.offsetLeft;
+    this.pieceCursorOrigin.y = el.offsetTop;
+    this.pieceCursor.classList.add('cursor');
+    this.pieceCursor.style.left = this.pieceCursorOrigin.x + "px";
+    this.pieceCursor.style.top  = this.pieceCursorOrigin.y + "px";
+    el.parentElement.appendChild(this.pieceCursor); // arbitrarily place at end of board element
   }
 
   handlerPieceMotionBegin (piece) {
+    if (this.isWinner()) { return; } // Ignore user if currenly in a winning state, new game not setup yet.
+
     event.preventDefault();
     event.stopPropagation();
-    if (this.isWinner()) { return; }
-    let touch = event.changedTouches ? event.changedTouches.item(0) : false;
-    if (this.pieceLifted) { this.liftedStateReset(); }
-    piece.style.zIndex = 1;
-    piece.firstChild.style.backgroundColor="lightpink";
-    this.pieceLifted = piece;
-    this.piceLiftedLoc = [touch?touch.clientX:event.x, touch?touch.clientY:event.y];
-    return true;
-  }
 
-  handlerPieceMotion () {
-    if (!this.pieceLifted) { return true; } // Skip if not in a "lifting/moving piece" state
+    this.resetMovePieceSatate(); // Reset drag/drop state in case of algorithm/UX hiccup
 
-    // Extract location from either touch or mouse event
-    const touch = event.changedTouches ? event.changedTouches.item(0) : false;
-    let nx = (touch?touch.clientX:event.x) - this.piceLiftedLoc[0];
-    let ny = (touch?touch.clientY:event.y) - this.piceLiftedLoc[1];
+    this.createMouseCursorFrom(piece); // The cursor becomes a copy of the piece being moved
 
-    // Swap elements if lifted element moved left
-    const elmLeft = this.pieceLifted.previousElementSibling;
-    if (nx < -elmLeft.offsetWidth/2.0 && null != elmLeft.previousElementSibling) {
-      elmLeft.insertAdjacentElement("beforebegin", this.pieceLifted);
-      this.piceLiftedLoc[0] -= elmLeft.offsetWidth;
-      // DOM updated so recalculate lifted piece location
-      nx = (touch?touch.clientX:event.x) - this.piceLiftedLoc[0];
-      ny = (touch?touch.clientY:event.y) - this.piceLiftedLoc[1];
-      // Animate displaced piece to lifted piece's location
-      sweepMapRange(10, -this.pieceLifted.offsetWidth, 1, 1.3, 0, (v)=>elmLeft.style.left=`${v}px`);
-    }
-    // Swap elements if lifted element moved right
-    let elmRight = this.pieceLifted.nextElementSibling;
-    if (elmRight.offsetWidth/2.0 < nx && null != elmRight.nextElementSibling) {
-      elmRight.insertAdjacentElement("afterend", this.pieceLifted)
-      this.piceLiftedLoc[0] += elmRight.offsetWidth;
-      // DOM updated so recalculate lifted piece location
-      nx = (touch?touch.clientX:event.x) - this.piceLiftedLoc[0];
-      ny = (touch?touch.clientY:event.y) - this.piceLiftedLoc[1];
-      // Animate displaced piece to lifted piece's location
-      sweepMapRange(10, this.pieceLifted.offsetWidth, -1, 1.3, 0, (v)=>elmRight.style.left=`${v}px`);
-    }
-    this.pieceLifted.style.left = nx+"px";
-    this.pieceLifted.style.top = ny+"px";
+    this.pieceMoving = piece;
+    this.pieceMovingSibling = piece.nextElementSibling;
+    this.pieceMoving.classList.add('shade'); // The piece being moved is re-styled
+    this.pieceMovingOrigin = this.pointerDetails(event); // Keep track of pointer start position for accurate cursor movement
+
+    // Temporarily lock pices into absolute positions.
+    this.lockPiecesPositions()
+
     return true;
   }
 
   handlerPieceMotionEnd () {
-    if (this.pieceLifted) { this.liftedStateReset(); }
+    this.resetMovePieceSatate();
     if (this.isSolved() && !this.isWinner()) {
-      coinsplosion.start();
+      CoinSplosion.start();
       this.updateWinnerMarquee(true)
       setTimeout(this.play.bind(this), 2000);
     }
     return true;
   }
 
+  handlerPieceMotion () {
+    if (!this.pieceMoving) { return true; } // Skip if not in a "lifting/moving piece" state
+
+    const pointer = this.pointerDetails(event);
+    const pointerDelta = { w:pointer.x-this.pieceMovingOrigin.x, h:pointer.y-this.pieceMovingOrigin.y }
+
+    // Move cursor
+    this.pieceCursor.style.left = pointerDelta.w + this.pieceCursorOrigin.x + "px";
+    this.pieceCursor.style.top  = pointerDelta.h + this.pieceCursorOrigin.y + "px";
+
+    // Consider pointer's center location relative to the first child on this row.
+    const cursor = this.elementDetails(this.pieceCursor);
+    
+    // Rearrange the pieces in the DOM, placing the lifted piece
+    // in the best position relative to the mouse/cursor position.
+    const cursorY = cursor.yc - this.pieceCursor.offsetHeight/2;
+
+    const self=this; // OOP fail
+
+let DBOUT="";
+    this.rows.forEach( (row, rowsIdx)=>{
+    let isCursorOnRow = dist(cursorY, self.rowsYOffset[rowsIdx]) < self.rowsHeights[rowsIdx]/2;
+    let ptr = null;
+    let widthSum = 0;
+    let movingPlaced = !isCursorOnRow;
+    let rowNew = []; // keep track of new piece order for this row
+    row = row.map((el)=>[el, el.offsetLeft]);
+    const leftPad = self.rowsLeftPads[rowsIdx];
+    row.forEach( ([piece, left])=>{
+//DBOUT += `${isCursorOnRow} `;
+      let pieceWidth = piece.offsetWidth;
+
+      // Always place first piece (since it is an end piece which don't move)
+      if (!piece.previousElementSibling) {
+//DBOUT += `}${rowsIdx}[${piece.innerText} ${widthSum} ${pieceWidth}] `;
+        widthSum += pieceWidth;
+        //this.board.insertBefore(piece, this.board.firstElementChild);
+        ptr = piece;
+        rowNew.push(ptr);
+        return;
+      }
+      // Ignore  piece being moved.  Handled in subsequent logic in this method.
+      if (piece == this.pieceMoving) { ptr=piece; return; }
+
+
+      let cursorX = cursor.xc-row[0][0].offsetLeft;
+      if (!movingPlaced && (cursorX < widthSum+pieceWidth || piece==this.pieces()[this.pieces().length-1])) {
+        this.pieceMoving.style.left = leftPad + widthSum +"px";
+        this.pieceMoving.style.top = this.rowsYOffset[rowsIdx] + "px";
+//DBOUT += `${rowsIdx}[${this.pieceMoving.innerText} ${widthSum} ${this.pieceMoving.offsetWidth}] `;
+        widthSum += this.pieceMoving.offsetWidth;
+        if (!ptr) {
+          row[0][0].insertAdjacentElement("beforebegin", this.pieceMoving);
+        } else {
+          ptr.insertAdjacentElement("afterend", this.pieceMoving);
+        }
+        movingPlaced = true;
+        ptr = this.pieceMoving;
+        rowNew.push(ptr);
+      }
+      if (!ptr) {
+        row[0][0].insertAdjacentElement("beforebegin", piece);
+      } else {
+        ptr.insertAdjacentElement("afterend", piece);
+      }
+//DBOUT += `${rowsIdx}[${piece.innerText} ${widthSum} ${pieceWidth}] `;
+      rowNew.push(piece);
+      piece.style.left = leftPad + widthSum + "px";
+      piece.style.top = this.rowsYOffset[rowsIdx] + "px";
+      widthSum += pieceWidth;
+      ptr = piece;
+    })
+    // Update the rows state as.
+    this.rows[rowsIdx]=rowNew;
+    if (!movingPlaced) {
+        this.pieceMoving.style.left = leftPad + widthSum +"px";
+        this.pieceMoving.style.top = this.rowsYOffset[rowsIdx] + "px";
+        if (!ptr) {
+          this.rows[rowsIdx+1][0].insertAdjacentElement("beforebegin", this.pieceMoving);
+        } else {
+          ptr.insertAdjacentElement("afterend", this.pieceMoving);
+        }
+        DBOUT += `[${this.pieceMoving.innerText} ${widthSum}] `;
+    }
+    });
+
+//log(DBOUT);
+//log(this.rows.map( (row)=>row.reduce( (r,p)=>r+" "+p.innerText, "" )));
+
+    // Audio feed back but only if the piece moved (by way of noticing if the next sibling changed).
+    if (this.pieceMoving.nextElementSibling != this.pieceMovingSibling) {
+      this.pieceMovingSibling = this.pieceMoving.nextElementSibling;
+      audioTick();
+    }
+    return true;
+  }
+
   setupHandlerPieceMotionBegin() {
-    [...this.pieces].forEach( (piece, idx)=>{
-      const isEndPiece = idx==0 || idx==this.pieces.length-1;
+    [...this.pieces()].forEach( (piece, idx)=>{
+      const isEndPiece = idx==0 || idx==this.pieces().length-1;
       piece.onmousedown = isEndPiece ? null : this.handlerPieceMotionBegin.bind(this, piece);
       piece.addEventListener("touchstart", piece.onmousedown);
     });
@@ -249,7 +443,7 @@ class GameBoard {
   }
 
   constructor () {
-    this.setupHandlerPieceMotion().setupHandlerPieceMotionEnd();
+    this.setupHandlerPieceMotionBegin().setupHandlerPieceMotion().setupHandlerPieceMotionEnd();
   }
 
   play () {
@@ -257,10 +451,19 @@ class GameBoard {
     return this;
   }
 
+  start () {
+    // Start the board with 3 pieces
+    let piece = $('.piece');
+    this.addNewPiece();
+    this.addNewPiece();
+    //piece.insertAdjacentElement('afterend', piece.cloneNode(true));
+    this.play();
+  }
+
 } // GameBoard
 
 
-var coinsplosion = new class CoinSplosion {
+var CoinSplosion = new class {
 
   coins=[];
 
@@ -286,6 +489,7 @@ var coinsplosion = new class CoinSplosion {
 
   // Animate coins fullscreen in a parabolic arc
   start () {
+    if (!animate) { return this; } 
     let gw = document.defaultView.innerWidth;
     let gh = document.defaultView.innerHeight;
     // Initialize coin state: [location, velocity, acceleration]
@@ -303,22 +507,21 @@ var coinsplosion = new class CoinSplosion {
       });
       return done ? undefined : [delay];
     }, 50);
+    return this
   }
 
 } // CoinSplosion
 
 
-function start () {
-  let eStart = event.target
-  let piece = eStart.parentElement.parentElement;
-  eStart.remove();
-  // Start the board with 3 pieces
-  piece.insertAdjacentElement('afterend', piece.cloneNode(true));
-  piece.insertAdjacentElement('afterend', piece.cloneNode(true));
-  (new GameBoard).play();
+var gameBoard;
+
+function ehStartButton (el) {
+  (el || event.target).remove();
+  gameBoard = new GameBoard;
+  gameBoard.start();
 }
 
+//ehStartButton($("span"));
 
-//]]></script>
-</body>
-</html>
+//]]></script></body></html><!--
+-->
