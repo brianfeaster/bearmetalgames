@@ -2,18 +2,18 @@
 <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en"><head>
 <title>Sorthem™</title>
 <meta http-equiv="Content-Type" content="text/html;charset=utf-8"/>
-<meta name="viewport" content="initial-scale=1.0"/>
+<meta name="viewport" content="initial-scale=2.0"/>
 <style type="text/css">
   body {background:#fff; color:#000; height:100vh; font-family:sans-serif,arial,helvetica }
   div,p,h1 { margin:0; border:0; padding:0 }
   .shade { opacity:0.2 }
   .board { padding: 1ch; background:#eee; text-align:center; position:relative }
-  .piece { _position:relative; display:inline-block; padding:0 .5ch 0 .5ch; border: solid medium grey; border-radius:1em; }
+  .piece { display:inline-block; padding:0 .5ch 0 .5ch; border: solid medium grey; border-radius:1em; margin-bottom:1ch }
   .piece:is(:last-child, :first-child) > p:nth-child(2) { display:none }
   .piece:not(:first-child, :last-child) > p:first-child:hover { border:solid medium blue }
   .piece:not(:first-child, :last-child) > p:first-child:has(+p:hover) { border:solid medium blue }
   /*.piece:before { content:'-'; display:inline-block }*/
-  .cursor { position:absolute; background-color:lightpink; scale:70%; }
+  .cursor { position:absolute; background-color:lightpink; scale:100%; }
 
   /*.piece::after, .piece::before {
     font-family: 'Material Symbols Sharp';
@@ -26,7 +26,7 @@
 
 </style></head><body>
 
-<canvas id="animatedboxes" width="32" height="32" onclick="CoinSplosion.start()"></canvas>
+<canvas id="animatedboxes" width="32" height="32" onclick="ConfettiSplosion.start()"></canvas>
 <h1 style="display:inline-block">Sorthem™</h1>
 
 <i>Sort the numbers and win!</i>
@@ -44,7 +44,6 @@
 </div>
 <div id="winner" style="margin:1em; background:#fee; text-align:center; display:none">Winner Winner Chicken Dinner</div>
 
-<div id="coins" style="position:fixed; bottom:0ch; left:0ch; font-size:300%"></div>
 
 <script type="text/javascript">//<![CDATA[
 "use strict";
@@ -155,7 +154,7 @@ function audioTick () {
 
 ////////////////////////////////////////
 
-class GameBoard {
+var gameBoard = new class {
 
   board = $("#board");
 
@@ -166,7 +165,10 @@ class GameBoard {
   pieceCursor = null;
   pieceCursorOrigin = {x:0, y:0};
 
+  slowAdjust = 0; // Used to slowly movie pice up above user's finger on mobile.
+
   rows = [[]];
+  rowsOriginal = [[]];
   rowsYOffset = [];
   rowsHeights = [];
   rowsLeftPads = []
@@ -189,10 +191,11 @@ class GameBoard {
 
   // Extract "pointer" location from either touch or mouse event
   pointerDetails (event) {
-    const touch = event.changedTouches ? event.changedTouches.item(0) : false;
+    const isTouch = event.changedTouches;
+    const touch = isTouch ? event.changedTouches.item(0) : false;
     const x = touch ? touch.clientX : event.x;
     const y = touch ? touch.clientY : event.y;
-    return { x:x, y:y }
+    return { x:x, y:y, isTouch }
   }
 
   updateWinnerMarquee (state) {
@@ -240,6 +243,9 @@ class GameBoard {
     return this.isSolved() && this.resetRandomValues() || this;
   }
 
+  dupRows (rows) { return rows.map((row)=>[...row]); }
+
+  // TODO: save/reinstate existing position/left/top values.
   lockPiecesPositions () {
     [...this.pieces()]
       .map((piece)=>[piece, piece.offsetLeft+"px", piece.offsetTop+"px"])
@@ -261,6 +267,7 @@ class GameBoard {
       this.rows[this.rows.length-1].push(el);
     });
 
+    this.rowsOriginal = this.dupRows(this.rows);
     this.rowsYOffset = this.rows.map( (row)=>row[0].offsetTop );
     this.rowsHeights = this.rows.map( (row)=>row[0].offsetHeight );
     this.rowsLeftPads = this.rows.map( (row)=>row[0].offsetLeft );
@@ -311,24 +318,35 @@ class GameBoard {
     // Temporarily lock pices into absolute positions.
     this.lockPiecesPositions()
 
+    this.slowAdjust = 0;
+
+    setTimeoutLoop((delay)=>{
+      const pointer = this.pieceMovingOrigin;
+      if (!pointer.isTouch) { return }
+      if (this.slowAdjust < this.rowsHeights[0]/2) { ++this.slowAdjust; } else { return; }
+      this.pieceCursor.style.top  = this.pieceCursorOrigin.y -this.slowAdjust + "px";
+      return [delay];
+    }, 20);
     return true;
   }
 
   handlerPieceMotionEnd () {
     this.resetMovePieceSatate();
     if (this.isSolved() && !this.isWinner()) {
-      CoinSplosion.start();
+      ConfettiSplosion.start();
       this.updateWinnerMarquee(true)
       setTimeout(this.play.bind(this), 2000);
     }
     return true;
   }
 
+
   handlerPieceMotion () {
     if (!this.pieceMoving) { return true; } // Skip if not in a "lifting/moving piece" state
 
     const pointer = this.pointerDetails(event);
-    const pointerDelta = { w:pointer.x-this.pieceMovingOrigin.x, h:pointer.y-this.pieceMovingOrigin.y }
+    if (pointer.isTouch && this.slowAdjust < this.rowsHeights[0]/2) { ++this.slowAdjust; }
+    const pointerDelta = { w:pointer.x-this.pieceMovingOrigin.x, h:pointer.y-this.pieceMovingOrigin.y-this.slowAdjust }
 
     // Move cursor
     this.pieceCursor.style.left = pointerDelta.w + this.pieceCursorOrigin.x + "px";
@@ -342,63 +360,69 @@ class GameBoard {
     const cursorY = cursor.yc - this.pieceCursor.offsetHeight/2;
 
     const self=this; // OOP fail
+//let DBOUT="";
 
-let DBOUT="";
-    this.rows.forEach( (row, rowsIdx)=>{
-    let isCursorOnRow = dist(cursorY, self.rowsYOffset[rowsIdx]) < self.rowsHeights[rowsIdx]/2;
-    let ptr = null;
-    let widthSum = 0;
-    let movingPlaced = !isCursorOnRow;
-    let rowNew = []; // keep track of new piece order for this row
-    row = row.map((el)=>[el, el.offsetLeft]);
-    const leftPad = self.rowsLeftPads[rowsIdx];
-    row.forEach( ([piece, left])=>{
+    const cursorIsOnAnyRow = this.rowsYOffset.some((y,idx)=>dist(cursorY, y)<self.rowsHeights[idx]/2);
+
+    (cursorIsOnAnyRow ? this.rows : this.rowsOriginal).forEach((row, rowsIdx)=>{
+      let isCursorOnRow = dist(cursorY, self.rowsYOffset[rowsIdx]) < self.rowsHeights[rowsIdx]/2;
+      let ptr = null;
+      let widthSum = 0;
+      let movingPlaced = !isCursorOnRow;
+      let rowNew = []; // keep track of new piece order for this row
+      row = row.map((el)=>[el, el.offsetLeft]);
+      const leftPad = self.rowsLeftPads[rowsIdx];
+
+      row.forEach( ([piece, left])=>{
 //DBOUT += `${isCursorOnRow} `;
-      let pieceWidth = piece.offsetWidth;
+        let pieceWidth = piece.offsetWidth;
 
-      // Always place first piece (since it is an end piece which don't move)
-      if (!piece.previousElementSibling) {
+        // Always place first piece (since it is an end piece which don't move)
+        if (!piece.previousElementSibling) {
 //DBOUT += `}${rowsIdx}[${piece.innerText} ${widthSum} ${pieceWidth}] `;
-        widthSum += pieceWidth;
-        //this.board.insertBefore(piece, this.board.firstElementChild);
-        ptr = piece;
-        rowNew.push(ptr);
-        return;
-      }
-      // Ignore  piece being moved.  Handled in subsequent logic in this method.
-      if (piece == this.pieceMoving) { ptr=piece; return; }
-
-
-      let cursorX = cursor.xc-row[0][0].offsetLeft;
-      if (!movingPlaced && (cursorX < widthSum+pieceWidth || piece==this.pieces()[this.pieces().length-1])) {
-        this.pieceMoving.style.left = leftPad + widthSum +"px";
-        this.pieceMoving.style.top = this.rowsYOffset[rowsIdx] + "px";
-//DBOUT += `${rowsIdx}[${this.pieceMoving.innerText} ${widthSum} ${this.pieceMoving.offsetWidth}] `;
-        widthSum += this.pieceMoving.offsetWidth;
-        if (!ptr) {
-          row[0][0].insertAdjacentElement("beforebegin", this.pieceMoving);
-        } else {
-          ptr.insertAdjacentElement("afterend", this.pieceMoving);
+          widthSum += pieceWidth;
+          //this.board.insertBefore(piece, this.board.firstElementChild);
+          ptr = piece;
+          rowNew.push(ptr);
+          return;
         }
-        movingPlaced = true;
-        ptr = this.pieceMoving;
-        rowNew.push(ptr);
-      }
-      if (!ptr) {
-        row[0][0].insertAdjacentElement("beforebegin", piece);
-      } else {
-        ptr.insertAdjacentElement("afterend", piece);
-      }
+        // Ignore  piece being moved.  Handled in subsequent logic in this method.
+        if (cursorIsOnAnyRow && piece==this.pieceMoving) { ptr=piece; return; }
+
+        let cursorX = cursor.xc-row[0][0].offsetLeft;
+        if (!movingPlaced && (cursorX < widthSum+pieceWidth || piece==this.pieces()[this.pieces().length-1])) {
+          this.pieceMoving.style.left = leftPad + widthSum +"px";
+          this.pieceMoving.style.top = this.rowsYOffset[rowsIdx] + "px";
+//DBOUT += `${rowsIdx}[${this.pieceMoving.innerText} ${widthSum} ${this.pieceMoving.offsetWidth}] `;
+          widthSum += this.pieceMoving.offsetWidth;
+          if (!ptr) {
+            row[0][0].insertAdjacentElement("beforebegin", this.pieceMoving);
+          } else {
+            ptr.insertAdjacentElement("afterend", this.pieceMoving);
+          }
+          movingPlaced = true;
+          ptr = this.pieceMoving;
+          rowNew.push(ptr);
+        }
+
+        if (!ptr) {
+          row[0][0].insertAdjacentElement("beforebegin", piece);
+        } else {
+          ptr.insertAdjacentElement("afterend", piece);
+        }
 //DBOUT += `${rowsIdx}[${piece.innerText} ${widthSum} ${pieceWidth}] `;
-      rowNew.push(piece);
-      piece.style.left = leftPad + widthSum + "px";
-      piece.style.top = this.rowsYOffset[rowsIdx] + "px";
-      widthSum += pieceWidth;
-      ptr = piece;
-    })
-    // Update the rows state as.
-    this.rows[rowsIdx]=rowNew;
-    if (!movingPlaced) {
+        rowNew.push(piece);
+        piece.style.left = leftPad + widthSum + "px";
+        piece.style.top = this.rowsYOffset[rowsIdx] + "px";
+        widthSum += pieceWidth;
+        ptr = piece;
+      });
+
+      // Update the rows state.
+      this.rows[rowsIdx] = rowNew;
+
+      // Everything was placed before the moving piece...so append it to row.
+      if (!movingPlaced) {
         this.pieceMoving.style.left = leftPad + widthSum +"px";
         this.pieceMoving.style.top = this.rowsYOffset[rowsIdx] + "px";
         if (!ptr) {
@@ -406,8 +430,9 @@ let DBOUT="";
         } else {
           ptr.insertAdjacentElement("afterend", this.pieceMoving);
         }
-        DBOUT += `[${this.pieceMoving.innerText} ${widthSum}] `;
-    }
+//DBOUT += `[${this.pieceMoving.innerText} ${widthSum}] `;
+      }
+
     });
 
 //log(DBOUT);
@@ -442,82 +467,89 @@ let DBOUT="";
     return this;
   }
 
-  constructor () {
-    this.setupHandlerPieceMotionBegin().setupHandlerPieceMotion().setupHandlerPieceMotionEnd();
-  }
 
   play () {
-    this.updateWinnerMarquee(false).addNewPiece().resetRandomValues().setupHandlerPieceMotionBegin();
-    return this;
+    return this
+      .updateWinnerMarquee(false)
+      .addNewPiece()
+      .resetRandomValues()
+      .setupHandlerPieceMotionBegin();
   }
+
 
   start () {
-    // Start the board with 3 pieces
-    let piece = $('.piece');
-    this.addNewPiece();
-    this.addNewPiece();
-    //piece.insertAdjacentElement('afterend', piece.cloneNode(true));
-    this.play();
+    return this
+      .setupHandlerPieceMotionBegin()
+      .setupHandlerPieceMotion()
+      .setupHandlerPieceMotionEnd()
+      // Start the board with 2 pieces
+      .addNewPiece()
+      .addNewPiece()
+      .play();
   }
 
-} // GameBoard
+  constructor () { }
+
+} // instance gameBoard
 
 
-var CoinSplosion = new class {
+var ConfettiSplosion = new class {
 
-  coins=[];
+  confetti=[];
+  count = 40;
+
+  constructor () {
+    let elConfetti = CreateAppendChild("div", document.body);
+    elConfetti.style.position = "fixed";
+    elConfetti.style.bottom = elConfetti.style.left = 0;
+    elConfetti.style.fontSize = "50%";
+
+    this.confetti = [...Array(this.count)]
+      .map((_)=>{
+        const elConfetto = CreateAppendChild("p", elConfetti, " ");
+        elConfetto.style.backgroundColor = `rgb(${rnd(256)},${rnd(256)},${rnd(256)})`;
+        elConfetto.style.position = "absolute";
+        elConfetto.style.minWidth = "1em";
+        return [elConfetto, [0,0, 0,0, 0,0, rnd(360)]] ;// x,y, v,v, a,a, angle
+      });
+  }
 
   /* Calculate next position object's state:  location is incremented
      by velocity and velocity incremented by acceleration.
   */
   positionStateStep (pos) {
-    return [pos[0]+pos[2], pos[1]+pos[3], pos[2]+pos[4], pos[3]+pos[5], pos[4], pos[5]];
+    return [pos[0]+pos[2], pos[1]+pos[3], pos[2]+pos[4], pos[3]+pos[5], pos[4], pos[5], pos[6]+20];
   }
 
-  constructor () {
-    [
-     '💸','💴','💷','🤑','💲','💳','🪙','💰','💵','💶',
-     '💸','💴','💷','🤑','💲','💳','🪙','💰','💵','💶',
-     '💸','💴','💷','🤑','💲','💳','🪙','💰','💵','💶',
-     '💸','💴','💷','🤑','💲','💳','🪙','💰','💵','💶',
-    ].forEach( (c)=>{
-      let e = CreateAppendChild("b", $("#coins"), c);
-      e.style.position = "absolute";
-      this.coins.push([e, [0,0, 0,0, 0,0]]);
-    });
-  }
-
-  // Animate coins fullscreen in a parabolic arc
+  // Animate confetti fullscreen in a parabolic arc
   start () {
     if (!animate) { return this; } 
-    let gw = document.defaultView.innerWidth;
-    let gh = document.defaultView.innerHeight;
+    let gw = document.body.offsetWidth;
+    let gh = document.body.offsetHeight;
     // Initialize coin state: [location, velocity, acceleration]
-    this.coins.forEach((coin)=>coin[1] = [0, 0, (20+rnd(150))/5000, (300+rnd(200))/5000, 0, -.005]);
+    this.confetti.forEach((coin)=>coin[1] = [0, 0, (20+rnd(150))/5000, (300+rnd(200))/5000, 0, -.005, rnd(360)]);
     setTimeoutLoop( (delay)=>{
       let done = true;
-      this.coins.forEach( ([coin, pos], idx)=>{
+      this.confetti.forEach( ([coin, pos], idx)=>{
         if (0 <= pos[1]) { done=false; } // Keep going as long as a coin is visible
         let posX = (floor(idx/10)%2) ? pos[0] : 1-pos[0]; // Move left or right (every other set of 10)
         // Update element position
-        coin.style.left   = (posX  *gw - coin.clientWidth)+"px";
-        coin.style.bottom = (pos[1]*gh - coin.clientHeight)+"px";
+        coin.style.left   = posX  *gw+"px";
+        coin.style.bottom = pos[1]*gh+"px";
+        coin.style.transform = `rotate3d(1,1,1,${pos[6]}deg)`;
         // Update position state
-        this.coins[idx][1] = this.positionStateStep(pos);
+        this.confetti[idx][1] = this.positionStateStep(pos);
       });
       return done ? undefined : [delay];
     }, 50);
     return this
   }
 
-} // CoinSplosion
+} // Class ConfettiSplosion
 
-
-var gameBoard;
 
 function ehStartButton (el) {
   (el || event.target).remove();
-  gameBoard = new GameBoard;
   gameBoard.start();
 }
 
