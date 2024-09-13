@@ -17,8 +17,18 @@ class Dropula {
   rowsLeftPads = []
 
   pause = false;
-  callbackMotionEnd = ()=>{};
-  callbackQuasiMotion = ()=>{};
+
+  callbacks = {};
+
+  on (type, fn) {
+    this.callbacks[type] = fn;
+    return this;
+  }
+ 
+  callback (type, args) {
+    this.callbacks[type] && this.callbacks[type](...args);
+    return this;
+  }
 
   pieces () {
     return [...board.children].filter( (el)=>!el.classList.contains("cursor") );
@@ -149,8 +159,8 @@ class Dropula {
   }
 
   handlerPieceMotionEnd () {
-    this.resetMovePieceSatate()
-      .callbackMotionEnd();
+    this.resetMovePieceSatate();
+    this.callback('dragend', [this.pieceMoving]);
     return true;
   }
 
@@ -179,8 +189,6 @@ class Dropula {
 
     const cursorY = cursor.yc - this.pieceCursor.offsetHeight/2;
 
-//let DBOUT="";
-
     (this.withinRows(cursorY) ? this.rows : this.rowsOriginal).forEach((row, rowsIdx)=>{
       let isCursorOnRow = this.dist(cursorY, this.rowsYOffset[rowsIdx]) < this.rowsHeights[rowsIdx]/2;
       const cursorIsOnAnyRow = this.rowsYOffset.some((y,idx)=>this.dist(cursorY, y)<this.rowsHeights[idx]/2);
@@ -192,12 +200,10 @@ class Dropula {
       const leftPad = this.rowsLeftPads[rowsIdx];
 
       row.forEach( ([piece, left])=>{
-//DBOUT += `${isCursorOnRow} `;
         let pieceWidth = piece.offsetWidth;
 
         // Always place first piece (since it is an end piece which don't move)
         if (!piece.previousElementSibling) {
-//DBOUT += `${rowsIdx}[${piece.innerText} ${widthSum} ${pieceWidth}] `;
           widthSum += pieceWidth;
           //this.board.insertBefore(piece, this.board.firstElementChild);
           ptr = piece;
@@ -210,27 +216,25 @@ class Dropula {
         let cursorX = cursor.xc-row[0][0].offsetLeft;
         if (!movingPlaced && (cursorX < widthSum+pieceWidth || piece==this.pieces()[this.pieces().length-1])) {
 
-        // TODO: Preliminary smooth motion of pieces.
-        /*
-        let x = this.pieceMoving.offsetLeft;
-        let y = this.pieceMoving.offsetTop;
-        sweepMapRange(20,
-          [x,y],
-          [10,10],
-          [1,1],
-          [leftPad+widthSum, this.rowsYOffset[rowsIdx]],
-          (loc)=>{
-            this.pieceMoving.style.left = loc[0] +"px";
-            this.pieceMoving.style.top = loc[1] + "px";
-          }
-        );
-        */
-        let loc = [leftPad+widthSum, this.rowsYOffset[rowsIdx]];
-        this.pieceMoving.style.left = loc[0] +"px";
-        this.pieceMoving.style.top = loc[1] + "px";
+          // TODO: Preliminary smooth motion of pieces.
+          /*
+          let x = this.pieceMoving.offsetLeft;
+          let y = this.pieceMoving.offsetTop;
+          sweepMapRange(20,
+            [x,y],
+            [10,10],
+            [1,1],
+            [leftPad+widthSum, this.rowsYOffset[rowsIdx]],
+            (loc)=>{
+              this.pieceMoving.style.left = loc[0] +"px";
+              this.pieceMoving.style.top = loc[1] + "px";
+            }
+          );
+          */
+          let loc = [leftPad+widthSum, this.rowsYOffset[rowsIdx]];
+          this.pieceMoving.style.left = loc[0] +"px";
+          this.pieceMoving.style.top = loc[1] + "px";
  
-
-//DBOUT += `${rowsIdx}[${this.pieceMoving.innerText} ${widthSum} ${this.pieceMoving.offsetWidth}] `;
           widthSum += this.pieceMoving.offsetWidth;
           if (!ptr) {
             row[0][0].insertAdjacentElement("beforebegin", this.pieceMoving);
@@ -247,7 +251,7 @@ class Dropula {
         } else {
           ptr.insertAdjacentElement("afterend", piece);
         }
-//DBOUT += `${rowsIdx}[${piece.innerText} ${widthSum} ${pieceWidth}] `;
+
         rowNew.push(piece);
         piece.style.left = leftPad + widthSum + "px";
         piece.style.top = this.rowsYOffset[rowsIdx] + "px";
@@ -267,18 +271,14 @@ class Dropula {
         } else {
           ptr.insertAdjacentElement("afterend", this.pieceMoving);
         }
-//DBOUT += `[${this.pieceMoving.innerText} ${widthSum}] `;
       }
 
     });
 
-//log(DBOUT);
-//log(this.rows.map( (row)=>row.reduce( (r,p)=>r+" "+p.innerText, "" )));
-
     // Audio feed back but only if the piece moved (by way of noticing if the next sibling changed).
     if (this.pieceMoving.nextElementSibling != this.pieceMovingSibling) {
       this.pieceMovingSibling = this.pieceMoving.nextElementSibling;
-      this.callbackQuasiMotion();
+      this.callback("shadow", [this.pieceMoving, undefined, undefined]);
     }
 
     return true;
@@ -305,8 +305,8 @@ class Dropula {
     return this;
   }
 
-  constructor (board) {
-    this.board = board;
+  constructor (boards) {
+    this.board = boards.reduce( (res,ary)=>res.concat(ary) )
     this
       .setupHandlerPieceMotionBegin()
       .setupHandlerPieceMotion()

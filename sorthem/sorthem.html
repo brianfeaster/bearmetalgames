@@ -150,7 +150,6 @@ function audioTick () {
 
 var sorthem = new class {
   board = $("#board");
-  dropula = null;
 
   pieces () {
     return [...board.children].filter( (el)=>!el.classList.contains("cursor") );
@@ -181,7 +180,7 @@ var sorthem = new class {
   /* Randomize the piece values in the game board.
      Moves the smallest/largest to the ends.
   */
-  resetRandomValues () {
+  randomizeValues () {
     let min=10000, minElm;
     let max=-1, maxElm;
     const len = this.pieces().length;
@@ -195,7 +194,7 @@ var sorthem = new class {
     this.board.lastElementChild.insertAdjacentElement('afterend', maxElm);
 
     // Repeat this process if it happened to generated an already sorted arrangement.
-    return this.isSolved() && this.resetRandomValues() || this;
+    return this.isSolved() && this.randomizeValues() || this;
   }
 
   updateWinnerMarquee (state) {
@@ -208,28 +207,7 @@ var sorthem = new class {
     return this;
   }
 
-  play () {
-    this
-      .updateWinnerMarquee(false)
-      .addNewPiece()
-      .resetRandomValues();
-    this
-      .dropula = new Dropula(board);
-    this
-      .dropula.callbackMotionEnd = ()=>{
-        if (this.isSolved() && !this.isWinner()) {
-          this.dropula.pause = true;
-          animate && ConfettiSplosion.start();
-          this.updateWinnerMarquee(true)
-          setTimeout(this.play.bind(this), 2000);
-        }
-      }
-    this.dropula
-      .callbackQuasiMotion = ()=>{
-        audioTick();
-      };
-    return this;
-  }
+  constructor() { }
 
   start () {
     this
@@ -239,53 +217,57 @@ var sorthem = new class {
       .play()
   }
 
-  constructor() { }
-} // instance sorthem
-
+  play () {
+    this
+      .updateWinnerMarquee(false)
+      .addNewPiece()
+      .randomizeValues();
 
 /*
-    const dnd_handler = dragula(dnd_containers, {
-      'revertOnSpill': !this.#is_sandbox,
-      'removeOnSpill': this.#is_sandbox,
-      'direction': 'horizontal',
-      'mirrorContainer': container,
-      'copy': (el, src) => {
-        return src === this.#collections_container;  // can only copy out of collections_container
-      },
-      'invalid': (el, hdl) => {
-        return !hdl.classList.contains('handle');  // can only drag handles
-      },
-      'moves': (el, src, hdl, sib) => {
-        return !el.classList.contains('first-item')
-            && !el.classList.contains('last-item');
-      },
-      'accepts': (el, src, hdl, sib) => {
-        if (src === this.#collections_container) {     // cannot drop into collections_container
-          return false;
-        }
-        return sib                                     // cannot drop into last position
-            && !sib.classList.contains('gu-mirror')    // cannot drop into last position
-            && !sib.classList.contains('first-item');  // cannot drop into first position
-      },
+    this.dropula = new Dropula([board]);
+    this.dropula.callbackMotionEnd = ()=>{
+      if (this.isSolved() && !this.isWinner()) {
+        this.dropula.pause = true;
+        animate && ConfettiSplosion.start();
+        this.updateWinnerMarquee(true)
+        setTimeout(this.play.bind(this), 2000);
+      }
+    }
+    this.dropula.callbackQuasiMotion = ()=>{
+      audioTick();
+    };
+*/
+    const dnd_containers = [board];
+    const dnd_handler = new Dropula(dnd_containers, {
+      'revertOnSpill': undefined,
+      'removeOnSpill': undefined,
+      'direction': undefined,
+      'mirrorContainer': undefined,
+      'copy': undefined,
+      'invalid': undefined,
+      'moves': undefined,
+      'accepts': undefined,
     });
 
-    dnd_handler.on('drag', (el, src) => {
-      this.#on_first_interaction();
-      // handle shift caused by game_container::before
-      el.classList.remove('transit-shift-fix');
-      if (src === this.#game_container) {
-        el.classList.add('transit-shift-fix');
+    dnd_handler.on('shadow', (_el, _container, _source)=>{ audioTick(); });
+
+    // update the number of words used after drop
+    dnd_handler.on('dragend', (_el) => {
+      if (this.isSolved() && !this.isWinner()) {
+        dnd_handler.pause = true;                           // NEW!!!
+        animate && ConfettiSplosion.start();
+        this.updateWinnerMarquee(true)
+        setTimeout(this.play.bind(this), 2000);
       }
     });
 
-    // update the number of words used after drop
-    dnd_handler.on('dragend', (el) => {
-      this.#num_words_used = this.#get_board_doms().length;
-      this.#update_num_words_used_display();
-      this.#on_guess();
-    });
+    return this;
+  } // Sorthem.play()
 
-*/
+} // instance sorthem
+
+
+
 
 window.onload = ()=>window.location.search&&sorthem.start(); // Immediately start if query string exists.  Sound might not work immediately.
 
