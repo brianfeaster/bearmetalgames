@@ -17,7 +17,7 @@
 </style></head><body>
 
 <canvas title="confettisplosion" id="animatedboxes" width="32" height="32" onclick="ConfettiSplosion.start()"></canvas>
-<h1 style="display:inline-block">Sorthem™</h1>
+<h1 style="display:inline-block" onclick="window.location='??'">Sorthem™</h1>
 
 <i>Sort the numbers and win!</i>
 
@@ -30,23 +30,22 @@
 <hr/>
 
 <div id="board" class="board">
- <div class="piece"><b class="val"><span onclick="ehStartButton()">START!</span></b></div>
+ <div class="piece"><b class="val"><span id="startbutton" onclick="sorthem.start()">START!</span></b></div>
 </div>
 <div id="winner" style="margin:1em; background:#fee; text-align:center; display:none">Winner Winner Chicken Dinner</div>
 
-
+<script src="confettisplosion.js"></script>
+<script src="../dropula/dropula.js"></script>
 <script type="text/javascript">//<![CDATA[
 "use strict";
 const $ = (s)=>document.querySelector(s);
 const $$ = (s)=>[...document.querySelectorAll(s)];
 const log = console.log.bind(console);
 const sqrt = Math.sqrt;
-const abs = Math.abs;
 const floor = Math.floor;
 const rnd = (n)=>floor(Math.random()*n);
 const min = Math.min
 const max = Math.max
-const dist = (a,b)=>abs(a-b);
 const rgbstr = (r,g,b)=>`rgb(${r},${g},${b})`;
 var animate = true;
 var mute = false;
@@ -104,7 +103,7 @@ function sweepMapRange(delay, from, inc, incFac, to, fn) {
 }
 
 function ehAddPiece () {
-  !$("span") && gameBoard && gameBoard.play();
+  !$("span") && sorthem && sorthem.play();
 }
 
 function ehToggleAudio () {
@@ -132,6 +131,7 @@ function audioTick () {
   osc.stop(now+.01);
 }
 
+
 /* Plot random colored boxes in a canvas periodically.
 */
 +function () {
@@ -147,58 +147,25 @@ function audioTick () {
     [loopDelay]);
 }()
 
-////////////////////////////////////////
 
-var gameBoard = new class {
-
+var sorthem = new class {
   board = $("#board");
-
-  pieceMoving = null;
-  pieceMovingSibling = null;
-  pieceMovingOrigin = {x:0, y:0};
-
-  pieceCursor = null;
-  pieceCursorOrigin = {x:0, y:0};
-
-  slowAdjust = 0; // Used to slowly movie pice up above user's finger on mobile.
-
-  rows = [[]];
-  rowsOriginal = [[]];
-  rowsYOffset = [];
-  rowsHeights = [];
-  rowsLeftPads = []
+  dropula = null;
 
   pieces () {
     return [...board.children].filter( (el)=>!el.classList.contains("cursor") );
   }
 
-  elementDetails (e) {
-    const w = e.offsetWidth;
-    const h = e.offsetHeight;
-    const wc = floor(w/2);
-    const hc = floor(h/2);
-    const x = e.offsetLeft;
-    const y = e.offsetTop;
-    return { w:w, h:h, wc:wc, hc:hc, x:x, y:y, xc:x+wc, yc:y+hc };
-  }
-
-  delta (a, b) { return { x:b.x-a.x, y:b.y-a.y }; }
-
-  // Extract "pointer" location from either touch or mouse event
-  pointerDetails (event) {
-    const isTouch = event.changedTouches;
-    const touch = isTouch ? event.changedTouches.item(0) : false;
-    const x = touch ? touch.clientX : event.x;
-    const y = touch ? touch.clientY : event.y;
-    return { x:x, y:y, isTouch }
-  }
-
-  updateWinnerMarquee (state) {
-    $("#winner").style.display = state?"block":"none";
+  // Add new piece by cloning the first one
+  addNewPiece () {
+    let piece = this.pieces()[0];
+    piece.insertAdjacentElement('afterend', piece.cloneNode(true));
     return this;
   }
 
-  isWinner () { return $("#winner").style.display=="block"; }
+  isWinner () {
+    return $("#winner").style.display=="block";
+  }
 
   isSolved () {
     let winner = true;
@@ -209,13 +176,6 @@ var gameBoard = new class {
       valueLast = value;
     });
     return winner;
-  }
-
-  // Add new piece by cloning the first one
-  addNewPiece () {
-    let piece = this.pieces()[0];
-    piece.insertAdjacentElement('afterend', piece.cloneNode(true));
-    return this;
   }
 
   /* Randomize the piece values in the game board.
@@ -238,352 +198,97 @@ var gameBoard = new class {
     return this.isSolved() && this.resetRandomValues() || this;
   }
 
-  dupRows (rows) { return rows.map((row)=>[...row]); }
-
-  lockPiecesPositions () {
-    [...this.pieces()]
-      .map((piece)=>[piece, piece.offsetLeft+"px", piece.offsetTop+"px"])
-      .forEach(([piece, left, top])=>{
-         piece.style.position="absolute";
-         piece.style.left = left;
-         piece.style.top = top;
-      });
-
-    this.rows = []; // array of rows of pieces
-    let topOffset = -1;
-
-    // Collect the pieces into rows
-    this.pieces().map((el)=>{
-      if (topOffset != el.offsetTop) {
-        topOffset = el.offsetTop;
-        this.rows.push([]);
-      }
-      this.rows[this.rows.length-1].push(el);
-    });
-
-    this.rowsOriginal = this.dupRows(this.rows);
-    this.rowsYOffset = this.rows.map( (row)=>row[0].offsetTop );
-    this.rowsHeights = this.rows.map( (row)=>row[0].offsetHeight );
-    this.rowsLeftPads = this.rows.map( (row)=>row[0].offsetLeft );
-  }
-
-  unlockPiecesPositions () {
-    [...this.pieces()].forEach((piece)=>piece.style.position=null);
-  }
-
-  resetMovePieceSatate () {
-    if (this.pieceMoving) {
-      this.pieceMoving.classList.remove('shade');
-      this.pieceMoving = null;
-      this.pieceMovingSibling = null;
-    }
-    if (this.pieceCursor) {
-      this.pieceCursor.remove();
-      this.pieceCursor = null;
-    }
-    this.unlockPiecesPositions();
-  }
-
-  createMouseCursorFrom (el) {
-    this.pieceCursor = el.cloneNode(true);
-    this.pieceCursorOrigin.x = el.offsetLeft;
-    this.pieceCursorOrigin.y = el.offsetTop;
-    this.pieceCursor.classList.add('cursor');
-    this.pieceCursor.style.left = this.pieceCursorOrigin.x + "px";
-    this.pieceCursor.style.top  = this.pieceCursorOrigin.y + "px";
-    el.parentElement.appendChild(this.pieceCursor); // arbitrarily place at end of board element
-  }
-
-  handlerPieceMotionBegin (piece) {
-    if (this.isWinner()) { return; } // Ignore user if currenly in a winning state, new game not setup yet.
-
-    event.preventDefault();
-    event.stopPropagation();
-
-    this.resetMovePieceSatate(); // Reset drag/drop state in case of algorithm/UX hiccup
-
-    this.createMouseCursorFrom(piece); // The cursor becomes a copy of the piece being moved
-
-    this.pieceMoving = piece;
-    this.pieceMovingSibling = piece.nextElementSibling;
-    this.pieceMoving.classList.add('shade'); // The piece being moved is re-styled
-    this.pieceMovingOrigin = this.pointerDetails(event); // Keep track of pointer start position for accurate cursor movement
-
-    // Temporarily lock pices into absolute positions.
-    this.lockPiecesPositions()
-
-    this.slowAdjust = 0;
-
-    // Slowly move lifted element up (away from finger) for mobile event.
-    setTimeoutLoop(
-      ()=>{
-        if (!this.pieceMovingOrigin.isTouch || this.rowsHeights[0]/2 <= ++this.slowAdjust) {
-          return false;
-        }
-        this.pieceCursor.style.top = this.pieceCursorOrigin.y - this.slowAdjust + "px";
-      },
-      [10]);
-    return true;
-  }
-
-  handlerPieceMotionEnd () {
-    this.resetMovePieceSatate();
-    if (this.isSolved() && !this.isWinner()) {
-      animate && ConfettiSplosion.start();
-      this.updateWinnerMarquee(true)
-      setTimeout(this.play.bind(this), 2000);
-    }
-    return true;
-  }
-
-  withinRows (y) {
-    const last = this.rows.length-1;
-    return this.rowsYOffset[0] - this.rowsHeights[0]/2 <= y
-      && y <= this.rowsYOffset[last] + this.rowsHeights[last]/2;
-  }
-
-  handlerPieceMotion () {
-    if (!this.pieceMoving) { return true; } // Skip if not in a "lifting/moving piece" state
-
-    const pointer = this.pointerDetails(event);
-    if (pointer.isTouch && this.slowAdjust < this.rowsHeights[0]/2) { ++this.slowAdjust; }
-    const pointerDelta = { w:pointer.x-this.pieceMovingOrigin.x, h:pointer.y-this.pieceMovingOrigin.y-this.slowAdjust }
-
-    // Move cursor
-    this.pieceCursor.style.left = pointerDelta.w + this.pieceCursorOrigin.x + "px";
-    this.pieceCursor.style.top  = pointerDelta.h + this.pieceCursorOrigin.y + "px";
-
-    // Consider pointer's center location relative to the first child on this row.
-    const cursor = this.elementDetails(this.pieceCursor);
-    
-    // Rearrange the pieces in the DOM, placing the lifted piece
-    // in the best position relative to the mouse/cursor position.
-
-    const cursorY = cursor.yc - this.pieceCursor.offsetHeight/2;
-
-//let DBOUT="";
-
-    (this.withinRows(cursorY) ? this.rows : this.rowsOriginal).forEach((row, rowsIdx)=>{
-      let isCursorOnRow = dist(cursorY, this.rowsYOffset[rowsIdx]) < this.rowsHeights[rowsIdx]/2;
-      const cursorIsOnAnyRow = this.rowsYOffset.some((y,idx)=>dist(cursorY, y)<this.rowsHeights[idx]/2);
-      let ptr = null;
-      let widthSum = 0;
-      let movingPlaced = !isCursorOnRow;
-      let rowNew = []; // keep track of new piece order for this row
-      row = row.map((el)=>[el, el.offsetLeft]);
-      const leftPad = this.rowsLeftPads[rowsIdx];
-
-      row.forEach( ([piece, left])=>{
-//DBOUT += `${isCursorOnRow} `;
-        let pieceWidth = piece.offsetWidth;
-
-        // Always place first piece (since it is an end piece which don't move)
-        if (!piece.previousElementSibling) {
-//DBOUT += `}${rowsIdx}[${piece.innerText} ${widthSum} ${pieceWidth}] `;
-          widthSum += pieceWidth;
-          //this.board.insertBefore(piece, this.board.firstElementChild);
-          ptr = piece;
-          rowNew.push(ptr);
-          return;
-        }
-        // Ignore  piece being moved.  Handled in subsequent logic in this method.
-        if (this.withinRows(cursorY) && cursorIsOnAnyRow && piece==this.pieceMoving) { ptr=piece; return; }
-
-        let cursorX = cursor.xc-row[0][0].offsetLeft;
-        if (!movingPlaced && (cursorX < widthSum+pieceWidth || piece==this.pieces()[this.pieces().length-1])) {
-
-        // TODO: Preliminary smooth motion of pieces.
-        /*
-        let x = this.pieceMoving.offsetLeft;
-        let y = this.pieceMoving.offsetTop;
-        sweepMapRange(20,
-          [x,y],
-          [10,10],
-          [1,1],
-          [leftPad+widthSum, this.rowsYOffset[rowsIdx]],
-          (loc)=>{
-            this.pieceMoving.style.left = loc[0] +"px";
-            this.pieceMoving.style.top = loc[1] + "px";
-          }
-        );
-        */
-        let loc = [leftPad+widthSum, this.rowsYOffset[rowsIdx]];
-        this.pieceMoving.style.left = loc[0] +"px";
-        this.pieceMoving.style.top = loc[1] + "px";
- 
-
-//DBOUT += `${rowsIdx}[${this.pieceMoving.innerText} ${widthSum} ${this.pieceMoving.offsetWidth}] `;
-          widthSum += this.pieceMoving.offsetWidth;
-          if (!ptr) {
-            row[0][0].insertAdjacentElement("beforebegin", this.pieceMoving);
-          } else {
-            ptr.insertAdjacentElement("afterend", this.pieceMoving);
-          }
-          movingPlaced = true;
-          ptr = this.pieceMoving;
-          rowNew.push(ptr);
-        }
-
-        if (!ptr) {
-          row[0][0].insertAdjacentElement("beforebegin", piece);
-        } else {
-          ptr.insertAdjacentElement("afterend", piece);
-        }
-//DBOUT += `${rowsIdx}[${piece.innerText} ${widthSum} ${pieceWidth}] `;
-        rowNew.push(piece);
-        piece.style.left = leftPad + widthSum + "px";
-        piece.style.top = this.rowsYOffset[rowsIdx] + "px";
-        widthSum += pieceWidth;
-        ptr = piece;
-      });
-
-      // Update the rows state.
-      this.rows[rowsIdx] = rowNew;
-
-      // Everything was placed before the moving piece...so append it to row.
-      if (!movingPlaced) {
-        this.pieceMoving.style.left = leftPad + widthSum +"px";
-        this.pieceMoving.style.top = this.rowsYOffset[rowsIdx] + "px";
-        if (!ptr) {
-          this.rows[rowsIdx+1][0].insertAdjacentElement("beforebegin", this.pieceMoving);
-        } else {
-          ptr.insertAdjacentElement("afterend", this.pieceMoving);
-        }
-//DBOUT += `[${this.pieceMoving.innerText} ${widthSum}] `;
-      }
-
-    });
-
-//log(DBOUT);
-//log(this.rows.map( (row)=>row.reduce( (r,p)=>r+" "+p.innerText, "" )));
-
-    // Audio feed back but only if the piece moved (by way of noticing if the next sibling changed).
-    if (this.pieceMoving.nextElementSibling != this.pieceMovingSibling) {
-      this.pieceMovingSibling = this.pieceMoving.nextElementSibling;
-      audioTick();
-    }
-
-    return true;
-  }
-
-  setupHandlerPieceMotionBegin() {
-    [...this.pieces()].forEach( (piece, idx)=>{
-      const isEndPiece = idx==0 || idx==this.pieces().length-1;
-      piece.onmousedown = isEndPiece ? null : this.handlerPieceMotionBegin.bind(this, piece);
-      piece.addEventListener("touchstart", piece.onmousedown);
-    });
+  updateWinnerMarquee (state) {
+    $("#winner").style.display = state?"block":"none";
     return this;
   }
 
-  setupHandlerPieceMotion() {
-    document.body.onmousemove = this.handlerPieceMotion.bind(this);
-    document.body.addEventListener("touchmove", document.body.onmousemove);
+  removeStartButton () {
+    $("#startbutton").remove();
     return this;
   }
-  setupHandlerPieceMotionEnd() {
-    document.body.onmouseup = this.handlerPieceMotionEnd.bind(this);
-    document.body.addEventListener("touchend", document.body.onmouseup);
-    document.body.addEventListener("touchcancel", document.body.onmouseup);
-    return this;
-  }
-
 
   play () {
-    return this
+    this
       .updateWinnerMarquee(false)
       .addNewPiece()
-      .resetRandomValues()
-      .setupHandlerPieceMotionBegin();
+      .resetRandomValues();
+    this
+      .dropula = new Dropula(board);
+    this
+      .dropula.callbackMotionEnd = ()=>{
+        if (this.isSolved() && !this.isWinner()) {
+          this.dropula.pause = true;
+          animate && ConfettiSplosion.start();
+          this.updateWinnerMarquee(true)
+          setTimeout(this.play.bind(this), 2000);
+        }
+      }
+    this.dropula
+      .callbackQuasiMotion = ()=>{
+        audioTick();
+      };
+    return this;
   }
-
 
   start () {
-    return this
-      .setupHandlerPieceMotionBegin()
-      .setupHandlerPieceMotion()
-      .setupHandlerPieceMotionEnd()
-      // Start the board with 2 pieces
+    this
+      .removeStartButton()
+      .addNewPiece() // add two pieces, eventually game starts with 4
       .addNewPiece()
-      .addNewPiece()
-      .play();
+      .play()
   }
 
-  constructor () { }
+  constructor() { }
+} // instance sorthem
 
-} // instance gameBoard
 
-
-var ConfettiSplosion = new class {
-
-  confettiCount = 50;
-  animationDelay = 50;
-  // Array of [confettiElement, descriptor] where descriptor
-  // is [X,Y, Xvel,Yvel, Xacc,Yacc, rotationAngle];
-  confetti = Array(this.confettiCount);
-
-  constructor () {
-    // Confetti container
-    const elConfetti = CreateAppendChild("div", document.body);
-    elConfetti.style.position = "fixed";
-    elConfetti.style.bottom = 0;
-    elConfetti.style.left = 0;
-    elConfetti.style.fontSize = "50%";
-    // Confetti
-    this.confetti.fill(0).forEach((_,i)=>{
-      const elConfetto = CreateAppendChild("p", elConfetti, " ");
-      elConfetto.style.backgroundColor = `rgb(${rnd(256)},${rnd(256)},${rnd(256)})`;
-      elConfetto.style.position = "absolute";
-      elConfetto.style.minWidth = "1em";
-      this.confetti[i] = [elConfetto, []];
+/*
+    const dnd_handler = dragula(dnd_containers, {
+      'revertOnSpill': !this.#is_sandbox,
+      'removeOnSpill': this.#is_sandbox,
+      'direction': 'horizontal',
+      'mirrorContainer': container,
+      'copy': (el, src) => {
+        return src === this.#collections_container;  // can only copy out of collections_container
+      },
+      'invalid': (el, hdl) => {
+        return !hdl.classList.contains('handle');  // can only drag handles
+      },
+      'moves': (el, src, hdl, sib) => {
+        return !el.classList.contains('first-item')
+            && !el.classList.contains('last-item');
+      },
+      'accepts': (el, src, hdl, sib) => {
+        if (src === this.#collections_container) {     // cannot drop into collections_container
+          return false;
+        }
+        return sib                                     // cannot drop into last position
+            && !sib.classList.contains('gu-mirror')    // cannot drop into last position
+            && !sib.classList.contains('first-item');  // cannot drop into first position
+      },
     });
-  }
 
-  resetConfettiState () {
-    this.confetti.forEach((desc)=>
-      desc[1] = rnd(2)
-        ?  [0, 0,   (20+rnd(150))/5000,(300+rnd(200))/5000,  0,-.005,  rnd(360)]  // right moving confetti
-        :  [1, 0,  -(20+rnd(150))/5000,(300+rnd(200))/5000,  0,-.005,  rnd(360)]); // left moving confetti
-  }
+    dnd_handler.on('drag', (el, src) => {
+      this.#on_first_interaction();
+      // handle shift caused by game_container::before
+      el.classList.remove('transit-shift-fix');
+      if (src === this.#game_container) {
+        el.classList.add('transit-shift-fix');
+      }
+    });
 
-  /* Render and calculate/update confetti's descriptors position and velocity values:
-     Location is incremented by velocity, velocity incremented by acceleration,
-     rotation is linear.
-  */
-  tick ([el, desc]) {
-    el.style.left   = desc[0] * document.body.offsetWidth  + "px";
-    el.style.bottom = desc[1] * document.body.offsetHeight + "px";
-    el.style.transform = `rotate3d(1,1,1,${desc[6]}deg)`;
-    desc[0] += desc[2]; // loc x,y
-    desc[1] += desc[3];
-    desc[2] += desc[4]; // velocity x,y
-    desc[3] += desc[5];
-    desc[6] += 20;      // rotation
-  }
+    // update the number of words used after drop
+    dnd_handler.on('dragend', (el) => {
+      this.#num_words_used = this.#get_board_doms().length;
+      this.#update_num_words_used_display();
+      this.#on_guess();
+    });
 
-  // Animate next frame for confetti. Return count still visible on screen.
-  tickAll () {
-    return this.confetti
-      .filter((confetto)=>(this.tick(confetto), -.2<confetto[1][1]))
-      .length
-  }
+*/
 
-  // Animate confetti fullscreen in a parabolic arc
-  start () {
-    this.resetConfettiState();
-    setTimeoutLoop(
-      ()=>{ if (!this.tickAll()) { return false; } },
-      [this.animationDelay]);
-  }
+window.onload = ()=>window.location.search&&sorthem.start(); // Immediately start if query string exists.  Sound might not work immediately.
 
-} // Class ConfettiSplosion
-
-
-function ehStartButton (el) {
-  (el || event.target).remove();
-  gameBoard.start();
-}
-
-//ehStartButton($("span"));
-
-//]]></script></body></html><!--
+//]]></script>
+</body></html><!--
 -->
