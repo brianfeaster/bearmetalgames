@@ -22,9 +22,11 @@ class Dropula {
     return this;
   }
 
+  hasCallback (type) {
+    return this.callbacks[type];
+  }
   callback (type, args) {
-    this.callbacks[type] && this.callbacks[type](...args);
-    return this;
+    return this.callbacks[type] && this.callbacks[type](...args);
   }
 
   pieces () {
@@ -151,7 +153,14 @@ class Dropula {
   }
 
   handlerPieceMotionBegin (piece) {
-    if (this.isPause) { return; } // Ignore user if currenly in a winning state, new game not setup yet.
+    // Ignore user if currenly in a winning state, new game not setup yet.
+    if (this.isPause) { return; }
+
+    // Skip unmoveable elements.
+    if (this.hasCallback("moves") && !this.callback("moves", [piece])) {
+      return;
+    }
+
     event.preventDefault();
     event.stopPropagation();
 
@@ -300,9 +309,8 @@ class Dropula {
   }
 
   setupHandlerPieceMotionBegin() {
-    [...this.pieces()].forEach( (piece, idx)=>{
-      const isEndPiece = idx==0 || idx==this.pieces().length-1;
-      piece.onmousedown = isEndPiece ? null : this.handlerPieceMotionBegin.bind(this, piece);
+    [...this.pieces()].forEach((piece)=>{
+      piece.onmousedown = this.handlerPieceMotionBegin.bind(this, piece);
       piece.addEventListener("touchstart", piece.onmousedown);
     });
     return this;
