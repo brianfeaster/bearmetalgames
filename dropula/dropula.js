@@ -1,22 +1,19 @@
 class Dropula {
-  board;
+  board; // The parent element whos children will be moved around
+  moving = null; // The element currently being moved
+  cursor = null; // A temporary "cursor" element (a copy of the current moving element)
 
-  pieceMoving = null;
-  pieceMovingSibling = null;
-  pieceMovingOrigin = {x:0, y:0};
-
-  pieceCursor = null;
-  pieceCursorOrigin = {x:0, y:0};
-
-  slowAdjust = 0; // Used to slowly movie pice up above user's finger on mobile.
-
+  // Elements grouped into their static/visual onscreen rows for arbitrary row appending/prepending.
   rows = [[]];
   rowsOriginal = [[]];
   rowsYOffset = [];
   rowsHeights = [];
   rowsLeftPads = []
 
-  pause = false;
+  isBoardLocked = false;
+  preLockedState = {};
+
+  isPause = false;
 
   callbacks = {};
 
@@ -24,14 +21,14 @@ class Dropula {
     this.callbacks[type] = fn;
     return this;
   }
- 
+
   callback (type, args) {
     this.callbacks[type] && this.callbacks[type](...args);
     return this;
   }
 
   pieces () {
-    return [...board.children].filter( (el)=>!el.classList.contains("cursor") );
+    return [...this.board.children].filter( (el)=>!el.classList.contains("dropulacursor") );
   }
 
   dist = (a,b)=>Math.abs(a-b);
@@ -45,7 +42,7 @@ class Dropula {
     let nextArgs = fn(...args);
     if (undefined === nextArgs) { nextArgs = args; }
     Array.isArray(nextArgs) && nextArgs.length
-      && setTimeout(setTimeoutLoop.bind(0, fn, nextArgs), nextArgs[0]);
+      && setTimeout(this.setTimeoutLoop.bind(this, fn, nextArgs), nextArgs[0]);
   }
 
   elementDetails (e) {
@@ -60,8 +57,8 @@ class Dropula {
 
   delta (a, b) { return { x:b.x-a.x, y:b.y-a.y }; }
 
-  // Extract "pointer" location from either touch or mouse event
-  pointerDetails (event) {
+  // Extract "mouse pointer" location from either touch or mouse event
+  eventLocDetails (event) {
     const isTouch = event.changedTouches;
     const touch = isTouch ? event.changedTouches.item(0) : false;
     const x = touch ? touch.clientX : event.x;
@@ -71,16 +68,32 @@ class Dropula {
 
   dupRows (rows) { return rows.map((row)=>[...row]); }
 
-  lockPiecesPositions () {
-    [...this.pieces()]
-      .map((piece)=>[piece, piece.offsetLeft+"px", piece.offsetTop+"px"])
-      .forEach(([piece, left, top])=>{
-         piece.style.position="absolute";
-         piece.style.left = left;
-         piece.style.top = top;
-      });
+  lockBoardPositions () {
+    if (this.isBoardLocked) { return; }
+    this.isBoardLocked = true;
 
-    this.rows = []; // array of rows of pieces
+    // Lock board down
+    const styleHeight = parseFloat(getComputedStyle(this.board).height);
+    const styleWidth  = parseFloat(getComputedStyle(this.board).width);
+    this.preLockedState.board = this.board.style; // Save board style/state
+    this.board.style.position="relative";
+    this.board.style.height = styleHeight + "px";
+    this.board.style.width  = styleWidth  + "px";
+
+    // Lock pieces down, saving original style/state.
+    this.preLockedState.pieces = [...this.pieces()]
+      .map((piece)=>{
+        const style = piece.style;
+        return [piece, style, piece.offsetTop, piece.offsetLeft];
+      })
+      .map(([piece, style, top, left])=>{
+        piece.style.position = "absolute";
+        piece.style.top = top + "px";
+        piece.style.left = left + "px";
+        return [piece, style];
+    });
+
+    this.rows = []; // internal array of rows of pieces
     let topOffset = -1;
 
     // Collect the pieces into rows
@@ -98,69 +111,73 @@ class Dropula {
     this.rowsLeftPads = this.rows.map( (row)=>row[0].offsetLeft );
   }
 
-  unlockPiecesPositions () {
-    [...this.pieces()].forEach((piece)=>piece.style.position=null);
-  }
-
-  resetMovePieceSatate () {
-    if (this.pieceMoving) {
-      this.pieceMoving.classList.remove('shade');
-      this.pieceMoving = null;
-      this.pieceMovingSibling = null;
-    }
-    if (this.pieceCursor) {
-      this.pieceCursor.remove();
-      this.pieceCursor = null;
-    }
-    this.unlockPiecesPositions();
-    return this;
+  unlockBoardPositions () {
+    if (!this.isBoardLocked) { return; }
+    this.isBoardLocked = false;
+    // Revert saved pieces DOM state.
+    this.preLockedState.pieces.forEach(([piece, style])=>piece.style=style);
+    // Revert board DOM state.
+    this.board.style = this.preLockedState.board;
   }
 
   createMouseCursorFrom (el) {
-    this.pieceCursor = el.cloneNode(true);
-    this.pieceCursorOrigin.x = el.offsetLeft;
-    this.pieceCursorOrigin.y = el.offsetTop;
-    this.pieceCursor.classList.add('cursor');
-    this.pieceCursor.style.left = this.pieceCursorOrigin.x + "px";
-    this.pieceCursor.style.top  = this.pieceCursorOrigin.y + "px";
-    el.parentElement.appendChild(this.pieceCursor); // arbitrarily place at end of board element
+    this.cursor = {el:el.cloneNode(true)};
+    this.cursor.x = parseFloat(getComputedStyle(el).left);
+    this.cursor.y = parseFloat(getComputedStyle(el).top);
+    this.cursor.el.classList.add("dropulacursor");
+    this.cursor.el.style.position = "absolute";
+    this.cursor.el.style.left = this.cursor.x + "px";
+    this.cursor.el.style.top  = this.cursor.y + "px";
+    this.cursor.slowAdjust = 0;
+    el.parentElement.appendChild(this.cursor.el); // arbitrarily place at end of board element
+
+    this.preLockedState.pieceMovingStyle = el.style;
+    this.moving = {el:el};
+    this.moving.sibling = el.nextElementSibling;
+    this.moving.el.style.opacity = 0.2;
+    this.moving.origin = this.eventLocDetails(event); // Keep track of pointer start position for accurate cursor movement
+  }
+
+  resetMovePieceState () {
+    if (this.moving) {
+      this.moving.el.style = this.preLockedState.pieceMovingStyle;
+      this.moving = null;
+    }
+    if (this.cursor) {
+      this.cursor.el.remove();
+      this.cursor = null;
+    }
+    return this;
   }
 
   handlerPieceMotionBegin (piece) {
-    if (this.pause) { return; } // Ignore user if currenly in a winning state, new game not setup yet.
-
+    if (this.isPause) { return; } // Ignore user if currenly in a winning state, new game not setup yet.
     event.preventDefault();
     event.stopPropagation();
 
-    this.resetMovePieceSatate(); // Reset drag/drop state in case of algorithm/UX hiccup
-
+    this.resetMovePieceState(); // Reset drag/drop state in case of algorithm/UX hiccup
+    this.lockBoardPositions() // Temporarily lock pices into absolute positions.
     this.createMouseCursorFrom(piece); // The cursor becomes a copy of the piece being moved
-
-    this.pieceMoving = piece;
-    this.pieceMovingSibling = piece.nextElementSibling;
-    this.pieceMoving.classList.add('shade'); // The piece being moved is re-styled
-    this.pieceMovingOrigin = this.pointerDetails(event); // Keep track of pointer start position for accurate cursor movement
-
-    // Temporarily lock pices into absolute positions.
-    this.lockPiecesPositions()
-
-    this.slowAdjust = 0;
 
     // Slowly move lifted element up (away from finger) for mobile event.
     this.setTimeoutLoop(
       ()=>{
-        if (!this.pieceMovingOrigin.isTouch || this.rowsHeights[0]/2 <= ++this.slowAdjust) {
+        if (!this.moving.origin.isTouch || this.rowsHeights[0]/2 <= ++this.cursor.slowAdjust) {
           return false;
         }
-        this.pieceCursor.style.top = this.pieceCursorOrigin.y - this.slowAdjust + "px";
+        this.cursor.el.style.top = this.cursor.y - this.cursor.slowAdjust + "px";
       },
       [10]);
+    this.callback('drag', [this.moving.el]);
     return true;
   }
 
   handlerPieceMotionEnd () {
-    this.resetMovePieceSatate();
-    this.callback('dragend', [this.pieceMoving]);
+    if (!this.moving) { return false; }
+    const el = this.moving.el;
+    this.resetMovePieceState();
+    this.unlockBoardPositions();
+    this.callback('dragend', [el]);
     return true;
   }
 
@@ -171,23 +188,21 @@ class Dropula {
   }
 
   handlerPieceMotion () {
-    if (!this.pieceMoving) { return true; } // Skip if not in a "lifting/moving piece" state
+    if (!this.moving) { return true; } // Skip if not in a "lifting/moving piece" state
 
-    const pointer = this.pointerDetails(event);
-    if (pointer.isTouch && this.slowAdjust < this.rowsHeights[0]/2) { ++this.slowAdjust; }
-    const pointerDelta = { w:pointer.x-this.pieceMovingOrigin.x, h:pointer.y-this.pieceMovingOrigin.y-this.slowAdjust }
+    const pointer = this.eventLocDetails(event);
+    const pointerDelta = { w:pointer.x-this.moving.origin.x, h:pointer.y-this.moving.origin.y-this.cursor.slowAdjust }
 
     // Move cursor
-    this.pieceCursor.style.left = pointerDelta.w + this.pieceCursorOrigin.x + "px";
-    this.pieceCursor.style.top  = pointerDelta.h + this.pieceCursorOrigin.y + "px";
+    this.cursor.el.style.left = pointerDelta.w + this.cursor.x + "px";
+    this.cursor.el.style.top  = pointerDelta.h + this.cursor.y + "px";
 
-    // Consider pointer's center location relative to the first child on this row.
-    const cursor = this.elementDetails(this.pieceCursor);
-    
+    const cursor = this.elementDetails(this.cursor.el);
+
     // Rearrange the pieces in the DOM, placing the lifted piece
     // in the best position relative to the mouse/cursor position.
 
-    const cursorY = cursor.yc - this.pieceCursor.offsetHeight/2;
+    const cursorY = cursor.yc - this.cursor.el.offsetHeight/2;
 
     (this.withinRows(cursorY) ? this.rows : this.rowsOriginal).forEach((row, rowsIdx)=>{
       let isCursorOnRow = this.dist(cursorY, this.rowsYOffset[rowsIdx]) < this.rowsHeights[rowsIdx]/2;
@@ -211,7 +226,7 @@ class Dropula {
           return;
         }
         // Ignore  piece being moved.  Handled in subsequent logic in this method.
-        if (this.withinRows(cursorY) && cursorIsOnAnyRow && piece==this.pieceMoving) { ptr=piece; return; }
+        if (this.withinRows(cursorY) && cursorIsOnAnyRow && piece==this.moving.el) { ptr=piece; return; }
 
         let cursorX = cursor.xc-row[0][0].offsetLeft;
         if (!movingPlaced && (cursorX < widthSum+pieceWidth || piece==this.pieces()[this.pieces().length-1])) {
@@ -232,17 +247,17 @@ class Dropula {
           );
           */
           let loc = [leftPad+widthSum, this.rowsYOffset[rowsIdx]];
-          this.pieceMoving.style.left = loc[0] +"px";
-          this.pieceMoving.style.top = loc[1] + "px";
- 
-          widthSum += this.pieceMoving.offsetWidth;
+          this.moving.el.style.left = loc[0] +"px";
+          this.moving.el.style.top = loc[1] + "px";
+
+          widthSum += this.moving.el.offsetWidth;
           if (!ptr) {
-            row[0][0].insertAdjacentElement("beforebegin", this.pieceMoving);
+            row[0][0].insertAdjacentElement("beforebegin", this.moving.el);
           } else {
-            ptr.insertAdjacentElement("afterend", this.pieceMoving);
+            ptr.insertAdjacentElement("afterend", this.moving.el);
           }
           movingPlaced = true;
-          ptr = this.pieceMoving;
+          ptr = this.moving.el;
           rowNew.push(ptr);
         }
 
@@ -264,21 +279,21 @@ class Dropula {
 
       // Everything was placed before the moving piece...so append it to row.
       if (!movingPlaced) {
-        this.pieceMoving.style.left = leftPad + widthSum +"px";
-        this.pieceMoving.style.top = this.rowsYOffset[rowsIdx] + "px";
+        this.moving.el.style.left = leftPad + widthSum +"px";
+        this.moving.el.style.top = this.rowsYOffset[rowsIdx] + "px";
         if (!ptr) {
-          this.rows[rowsIdx+1][0].insertAdjacentElement("beforebegin", this.pieceMoving);
+          this.rows[rowsIdx+1][0].insertAdjacentElement("beforebegin", this.moving.el);
         } else {
-          ptr.insertAdjacentElement("afterend", this.pieceMoving);
+          ptr.insertAdjacentElement("afterend", this.moving.el);
         }
       }
 
     });
 
     // Audio feed back but only if the piece moved (by way of noticing if the next sibling changed).
-    if (this.pieceMoving.nextElementSibling != this.pieceMovingSibling) {
-      this.pieceMovingSibling = this.pieceMoving.nextElementSibling;
-      this.callback("shadow", [this.pieceMoving, undefined, undefined]);
+    if (this.moving.el.nextElementSibling != this.moving.sibling) {
+      this.moving.sibling = this.moving.el.nextElementSibling;
+      this.callback("shadow", [this.moving.el, undefined, undefined]);
     }
 
     return true;
@@ -298,6 +313,7 @@ class Dropula {
     document.body.addEventListener("touchmove", document.body.onmousemove);
     return this;
   }
+
   setupHandlerPieceMotionEnd() {
     document.body.onmouseup = this.handlerPieceMotionEnd.bind(this);
     document.body.addEventListener("touchend", document.body.onmouseup);
@@ -305,8 +321,9 @@ class Dropula {
     return this;
   }
 
-  constructor (boards) {
-    this.board = boards.reduce( (res,ary)=>res.concat(ary) )
+  constructor (board) {
+    if (!board) return;
+    this.board = board;
     this
       .setupHandlerPieceMotionBegin()
       .setupHandlerPieceMotion()

@@ -16,7 +16,7 @@
 
 </style></head><body>
 
-<canvas title="confettisplosion" id="animatedboxes" width="32" height="32" onclick="ConfettiSplosion.start()"></canvas>
+<canvas title="confettisplosion" id="animatedboxes" width="32" height="32" onclick="audioHorn(),confettiSplosion.start()"></canvas>
 <h1 style="display:inline-block" onclick="window.location='??'">Sorthem™</h1>
 
 <i>Sort the numbers and win!</i>
@@ -47,10 +47,8 @@ const rnd = (n)=>floor(Math.random()*n);
 const min = Math.min
 const max = Math.max
 const rgbstr = (r,g,b)=>`rgb(${r},${g},${b})`;
-var animate = true;
-var mute = false;
-var ctx = (window.AudioContext && new window.AudioContext()) ||
-          (window.webkitAudioContext && new window.webkitAudioContext());
+var canAnimate = true;
+var canAudio = true;
 
 var CreateAppendChild = function (tag, parent, text) {
   let e = parent.appendChild(document.createElement(tag));
@@ -102,57 +100,84 @@ function sweepMapRange(delay, from, inc, incFac, to, fn) {
     [delay, from, inc, incFac, to, fn])
 }
 
-function ehAddPiece () {
-  !$("span") && sorthem && sorthem.play();
-}
+/* Plot random colored boxes in a canvas periodically.
+*/
++function () {
+  const divisions = 4;
+  const loopDelay = 500;
+  const canvas = $("#animatedboxes");
+  const ctx = canvas.getContext('2d');
+  const size = floor(canvas.width/divisions);
+  setTimeoutLoop((delay)=>{
+      ctx.fillStyle = '#' + rnd(16).toString(16) + rnd(16).toString(16) + rnd(16).toString(16);
+      ctx.fillRect(rnd(divisions)*size, rnd(divisions)*size, size, size);
+      return [delay<30?delay+1:loopDelay];
+    },
+    [0]);
+}()
 
-function ehToggleAudio () {
-  event.target.innerText = (mute=!mute)?"🔇":"🔈";
-}
+const acquireAudioContext = function(webAudio) {
+  return this[0] = this[0] || webAudio && new webAudio();
+}.bind([], window.AudioContext||window.webkitAudioContext);
 
-function ehToggleAnimation () {
-  event.target.innerText = (animate=!animate)?"🕺":"🧍";
+
+var bufferHorn;
+fetch("horn.raw")
+  .then(res => res.arrayBuffer())
+  .then(aryBuf => {
+     bufferHorn = acquireAudioContext().createBuffer(1, aryBuf.byteLength, 8000);
+     bufferHorn.getChannelData(0).set([...new Int8Array(aryBuf)].map(e=>e/128));
+  });
+
+function audioHorn () {
+  const ctx = canAudio && acquireAudioContext();
+  if (!ctx) { return; }
+
+  const gain = ctx.createGain();
+  gain.gain.value = 1.0
+  gain.connect(ctx.destination);
+
+  const sourceHorn = acquireAudioContext().createBufferSource();
+  sourceHorn.buffer = bufferHorn;
+  sourceHorn.connect(gain);
+  sourceHorn.start(ctx.currentTime);
+  sourceHorn.stop(ctx.currentTime+2);
 }
 
 function audioTick () {
-  if (!ctx || mute) { return; }
-  let osc = ctx.createOscillator();
-  let now = ctx.currentTime;
-
+  const ctx = canAudio && acquireAudioContext();
+  if (!ctx) { return; }
+  const gain = ctx.createGain();
+  gain.gain.value = 0.4
+  gain.connect(ctx.destination);
+  const osc = ctx.createOscillator();
   osc.frequency.value = 6000 + rnd(1000);
   osc.type = "square";
-
-  let gain = ctx.createGain();
-  gain.gain.value = 0.5
-
-  gain.connect(ctx.destination);
   osc.connect(gain);
+  const now = ctx.currentTime;
   osc.start(now);
   osc.stop(now+.01);
 }
 
 
-/* Plot random colored boxes in a canvas periodically.
-*/
-+function () {
-  const boxCount=4;
-  const loopDelay=200;
-  const canvas = $("#animatedboxes");
-  const ctx = canvas.getContext('2d');
-  const size = floor(canvas.width/boxCount);
-  setTimeoutLoop(()=>{
-      ctx.fillStyle = rgbstr(rnd(256), rnd(256), rnd(256));
-      ctx.fillRect(rnd(boxCount)*size, rnd(boxCount)*size, size, size);
-    },
-    [loopDelay]);
-}()
+function ehAddPiece () {
+  !$("span") && sorthem && sorthem.play();
+}
+
+function ehToggleAudio () {
+  event.target.innerText = (canAudio=!canAudio)?"🔈":"🔇";
+}
+
+function ehToggleAnimation () {
+  event.target.innerText = (canAnimate=!canAnimate)?"🕺":"🧍";
+}
 
 
 var sorthem = new class {
   board = $("#board");
 
   pieces () {
-    return [...board.children].filter( (el)=>!el.classList.contains("cursor") );
+    return [...this.board.children].filter((el)=>!el.classList.contains("cursor"));
   }
 
   // Add new piece by cloning the first one
@@ -193,7 +218,7 @@ var sorthem = new class {
     this.board.firstElementChild.insertAdjacentElement('beforebegin', minElm);
     this.board.lastElementChild.insertAdjacentElement('afterend', maxElm);
 
-    // Repeat this process if it happened to generated an already sorted arrangement.
+    // Re-randomize if already sorted.
     return this.isSolved() && this.randomizeValues() || this;
   }
 
@@ -202,16 +227,10 @@ var sorthem = new class {
     return this;
   }
 
-  removeStartButton () {
-    $("#startbutton").remove();
-    return this;
-  }
-
-  constructor() { }
-
   start () {
+    acquireAudioContext(); // Some platforms require the audio context be acquired with a UI event handler.
+    $("#startbutton").remove();
     this
-      .removeStartButton()
       .addNewPiece() // add two pieces, eventually game starts with 4
       .addNewPiece()
       .play()
@@ -222,44 +241,16 @@ var sorthem = new class {
       .updateWinnerMarquee(false)
       .addNewPiece()
       .randomizeValues();
-
-/*
-    this.dropula = new Dropula([board]);
-    this.dropula.callbackMotionEnd = ()=>{
-      if (this.isSolved() && !this.isWinner()) {
-        this.dropula.pause = true;
-        animate && ConfettiSplosion.start();
-        this.updateWinnerMarquee(true)
-        setTimeout(this.play.bind(this), 2000);
-      }
-    }
-    this.dropula.callbackQuasiMotion = ()=>{
-      audioTick();
-    };
-*/
-    const dnd_containers = [board];
-    const dnd_handler = new Dropula(dnd_containers, {
-      'revertOnSpill': undefined,
-      'removeOnSpill': undefined,
-      'direction': undefined,
-      'mirrorContainer': undefined,
-      'copy': undefined,
-      'invalid': undefined,
-      'moves': undefined,
-      'accepts': undefined,
-    });
-
-    dnd_handler.on('shadow', (_el, _container, _source)=>{ audioTick(); });
-
-    // update the number of words used after drop
-    dnd_handler.on('dragend', (_el) => {
-      if (this.isSolved() && !this.isWinner()) {
-        dnd_handler.pause = true;                           // NEW!!!
-        animate && ConfettiSplosion.start();
-        this.updateWinnerMarquee(true)
-        setTimeout(this.play.bind(this), 2000);
-      }
-    });
+    new Dropula(board)
+      .on('shadow', (_el, _container, _source)=>{ audioTick(); })
+      .on('dragend', (_el) => {
+        if (this.isSolved() && !this.isWinner()) {
+          this.pause = true;
+          canAnimate && (confettiSplosion.start(), audioHorn());
+          this.updateWinnerMarquee(true)
+          setTimeout(this.play.bind(this), 2000);
+        }
+      });
 
     return this;
   } // Sorthem.play()
@@ -267,9 +258,7 @@ var sorthem = new class {
 } // instance sorthem
 
 
-
-
-window.onload = ()=>window.location.search&&sorthem.start(); // Immediately start if query string exists.  Sound might not work immediately.
+window.onload = ()=>window.location.search&&sorthem.start(); // Immediately start if query string exists, sound might not work immediately.
 
 //]]></script>
 </body></html><!--
