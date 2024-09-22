@@ -10,9 +10,6 @@ class Dropula {
   rowsHeights = [];
   rowsLeftPads = []
 
-  isBoardLocked = false;
-  preLockedState = {};
-
   isPause = false;
 
   callbacks = {};
@@ -30,7 +27,7 @@ class Dropula {
   }
 
   pieces () {
-    return [...this.board.children].filter( (el)=>!el.classList.contains("dropulacursor") );
+    return [...this.board.el.children].filter( (el)=>!el.classList.contains("dropulacursor") );
   }
 
   dist = (a,b)=>Math.abs(a-b);
@@ -71,19 +68,18 @@ class Dropula {
   dupRows (rows) { return rows.map((row)=>[...row]); }
 
   lockBoardPositions () {
-    if (this.isBoardLocked) { return; }
-    this.isBoardLocked = true;
+    if (this.board.style) { return; }
 
     // Lock board down
-    const styleHeight = parseFloat(getComputedStyle(this.board).height);
-    const styleWidth  = parseFloat(getComputedStyle(this.board).width);
-    this.preLockedState.board = this.board.style; // Save board style/state
-    this.board.style.position="relative";
-    this.board.style.height = styleHeight + "px";
-    this.board.style.width  = styleWidth  + "px";
+    const styleHeight = parseFloat(getComputedStyle(this.board.el).height);
+    const styleWidth  = parseFloat(getComputedStyle(this.board.el).width);
+    this.board.style = this.board.el.style; // Save board style/state
+    this.board.el.style.position="relative";
+    this.board.el.style.height = styleHeight + "px";
+    this.board.el.style.width  = styleWidth  + "px";
 
     // Lock pieces down, saving original style/state.
-    this.preLockedState.pieces = [...this.pieces()]
+    this.board.pieces = [...this.pieces()]
       .map((piece)=>{
         const style = piece.style;
         return [piece, style, piece.offsetTop, piece.offsetLeft];
@@ -114,12 +110,12 @@ class Dropula {
   }
 
   unlockBoardPositions () {
-    if (!this.isBoardLocked) { return; }
-    this.isBoardLocked = false;
+    if (!this.board.style) { return; }
     // Revert saved pieces DOM state.
-    this.preLockedState.pieces.forEach(([piece, style])=>piece.style=style);
+    this.board.pieces.forEach(([piece, style])=>piece.style=style);
     // Revert board DOM state.
-    this.board.style = this.preLockedState.board;
+    this.board.el.style = this.board.style;
+    this.board.style = null;
   }
 
   createMouseCursorFrom (el) {
@@ -133,8 +129,7 @@ class Dropula {
     this.cursor.slowAdjust = 0;
     el.parentElement.appendChild(this.cursor.el); // arbitrarily place at end of board element
 
-    this.preLockedState.pieceMovingStyle = el.style;
-    this.moving = {el:el};
+    this.moving = {el:el, style:el.style};
     this.moving.sibling = el.nextElementSibling;
     this.moving.el.style.opacity = 0.2;
     this.moving.origin = this.eventLocDetails(event); // Keep track of pointer start position for accurate cursor movement
@@ -142,7 +137,7 @@ class Dropula {
 
   resetMovePieceState () {
     if (this.moving) {
-      this.moving.el.style = this.preLockedState.pieceMovingStyle;
+      this.moving.el.style = this.moving.style;
       this.moving = null;
     }
     if (this.cursor) {
@@ -223,18 +218,18 @@ class Dropula {
       row = row.map((el)=>[el, el.offsetLeft]);
       const leftPad = this.rowsLeftPads[rowsIdx];
 
-      row.forEach( ([piece, left])=>{
+      row.forEach(([piece, left])=>{
         let pieceWidth = piece.offsetWidth;
 
         // Always place first piece (since it is an end piece which don't move)
         if (!piece.previousElementSibling) {
           widthSum += pieceWidth;
-          //this.board.insertBefore(piece, this.board.firstElementChild);
+          //this.board.el.insertBefore(piece, this.board.el.firstElementChild);
           ptr = piece;
           rowNew.push(ptr);
           return;
         }
-        // Ignore  piece being moved.  Handled in subsequent logic in this method.
+        // Ignore piece being moved.  Handled in subsequent logic in this method.
         if (this.withinRows(cursorY) && cursorIsOnAnyRow && piece==this.moving.el) { ptr=piece; return; }
 
         let cursorX = cursor.xc-row[0][0].offsetLeft;
@@ -277,8 +272,8 @@ class Dropula {
         }
 
         rowNew.push(piece);
-        piece.style.left = leftPad + widthSum + "px";
         piece.style.top = this.rowsYOffset[rowsIdx] + "px";
+        piece.style.left = leftPad + widthSum + "px";
         widthSum += pieceWidth;
         ptr = piece;
       });
@@ -331,7 +326,7 @@ class Dropula {
 
   constructor (board) {
     if (!board) return;
-    this.board = board;
+    this.board = {el:board};
     this
       .setupHandlerPieceMotionBegin()
       .setupHandlerPieceMotion()
