@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en"><head>
 <title>Sorthem™</title>
-<meta http-equiv="Content-Type" content="text/html;charset=utf-8"/>
-<meta name="viewport" content="initial-scale=1.4"/>
-<style type="text/css">
+<meta http-equiv="Content-Type" content="text/html;charset=utf-8">
+<meta name="viewport" content="initial-scale=1.4">
+<style>
   body {background:#fff; color:#000; height:100vh; font-family:sans-serif,arial,helvetica }
   div,p,h1 { margin:0; border:0; padding:0 }
   .shade { opacity:0.2 }
@@ -16,7 +16,7 @@
 
 </style></head><body>
 
-<canvas title="confettisplosion" id="animatedboxes" width="32" height="32" onclick="audioHorn(),confettiSplosion.start()"></canvas>
+<canvas id="animatedboxes" title="animatedboxes" width="32" height="32" onclick="audioHorn(),confettiSplosion.start()"></canvas>
 <h1 style="display:inline-block" onclick="window.location='??'">Sorthem™</h1>
 
 <i>Sort the numbers and win!</i>
@@ -27,7 +27,7 @@
  <b title="toggle animation" onclick="ehToggleAnimation()">🕺</b>
 </div>
 
-<hr/>
+<hr>
 
 <div id="board" class="board">
  <div class="piece"><b class="val"><span id="startbutton" onclick="sorthem.start()">START!</span></b></div>
@@ -36,7 +36,7 @@
 
 <script src="confettisplosion.js"></script>
 <script src="../dropula/dropula.js"></script>
-<script type="text/javascript">//<![CDATA[
+<script>//<![CDATA[
 "use strict";
 const $ = (s)=>document.querySelector(s);
 const $$ = (s)=>[...document.querySelectorAll(s)];
@@ -104,16 +104,20 @@ function sweepMapRange(delay, from, inc, incFac, to, fn) {
 */
 +function () {
   const divisions = 4;
-  const loopDelay = 500;
   const canvas = $("#animatedboxes");
-  const ctx = canvas.getContext('2d');
-  const size = floor(canvas.width/divisions);
-  setTimeoutLoop((delay)=>{
-      ctx.fillStyle = '#' + rnd(16).toString(16) + rnd(16).toString(16) + rnd(16).toString(16);
-      ctx.fillRect(rnd(divisions)*size, rnd(divisions)*size, size, size);
-      return [delay<30?delay+1:loopDelay];
+
+  const box = function (ctx, divisions, size) {
+    ctx.fillStyle = '#' + rnd(16).toString(16) + rnd(16).toString(16) + rnd(16).toString(16);
+    ctx.fillRect(rnd(divisions)*size, rnd(divisions)*size, size, size);
+  }.bind(0, canvas.getContext('2d'), divisions, floor(canvas.width/divisions));
+  [...Array(40)].forEach(box);
+
+  setTimeoutLoop((delay, i)=>{
+      canvas.style.transform=`perspective(10ch) rotateX(60deg) rotateZ(${i}deg)`;
+      i%15 || box();
+      return [delay, i+1];
     },
-    [0]);
+    [50, 0]);
 }()
 
 const acquireAudioContext = function(webAudio) {
@@ -243,6 +247,7 @@ var sorthem = new class {
       .addNewPiece()
       .randomizeValues();
     new Dropula(board)
+      .animate(true)
       .on('moves', (el)=>{
         const pieces = this.pieces();
         return pieces[0]!=el && pieces[pieces.length-1]!=el;
