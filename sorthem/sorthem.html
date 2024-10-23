@@ -1,37 +1,38 @@
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en"><head>
-<title>Sorthem™</title>
 <meta http-equiv="Content-Type" content="text/html;charset=utf-8">
 <meta name="viewport" content="initial-scale=1.4">
-<style>
+<title>Sorthem™</title><style>
   body {background:#fff; color:#000; height:100vh; font-family:sans-serif,arial,helvetica }
   div,p,h1 { margin:0; border:0; padding:0 }
   .shade { opacity:0.2 }
-  .board { padding: 1ch; background:#eee; text-align:center; position:relative }
+  #boardouter { text-wrap:nowrap; }
+  .board { padding: 1ch; background:#eee; overflow:scroll; text-align:center; padding-bottom:3ch; position:relative }
   .piece { display:inline-flex; align-items:center; margin-bottom:1ch }
   .cursor { position:absolute }
   .cursor > .val { background-color:lightpink }
   .val {  padding:0 .5ch 0 .5ch; border:solid medium grey; border-radius:1em }
   .piece:before, .piece:after { content: ''; width: 11px; text-align: center; border-bottom: solid medium grey; }
-
+  #err { text-wrap: wrap; width:100vw; color:red; }
 </style></head><body>
 
 <canvas id="animatedboxes" title="animatedboxes" width="32" height="32" onclick="audioHorn(),confettiSplosion.start()"></canvas>
 <h1 style="display:inline-block" onclick="window.location='??'">Sorthem™</h1>
-
-<i>Sort the numbers and win!</i>
-
-<div style="position:fixed; top:0; right:0">
+<i style="text-wrap:nowrap">Sort the numbers and win!</i>
+<hr>
+<div style="text-align:right">
+ <b title="toggle scroll mode" onclick="ehToggleScroll()">📜</b>
  <b title="add new piece" onclick="ehAddPiece()">➕</b>
  <b title="toggle audio" onclick="ehToggleAudio()">🔈</b>
  <b title="toggle animation" onclick="ehToggleAnimation()">🕺</b>
 </div>
-
-<hr>
-
-<div id="board" class="board">
- <div class="piece"><b class="val"><span id="startbutton" onclick="sorthem.start()">START!</span></b></div>
+<div id="boardouter">
+ <div id="board" class="board">
+  <div class="piece"><b class="val"><span id="startbutton" onclick="sorthem.start()">START!</span></b></div>
+ </div>
 </div>
+<p id="db"  onclick="event.target.innerText=''"></p>
+<p id="err" onclick="event.target.innerText=''"></p>
 <div id="winner" style="margin:1em; background:#fee; text-align:center; display:none">Winner Winner Chicken Dinner</div>
 
 <script src="confettisplosion.js"></script>
@@ -47,8 +48,7 @@ const rnd = (n)=>floor(Math.random()*n);
 const min = Math.min
 const max = Math.max
 const rgbstr = (r,g,b)=>`rgb(${r},${g},${b})`;
-var canAnimate = true;
-var canAudio = true;
+var state={animate:true, audio:true, scrollable:true};
 
 var CreateAppendChild = function (tag, parent, text) {
   let e = parent.appendChild(document.createElement(tag));
@@ -103,6 +103,7 @@ function sweepMapRange(delay, from, inc, incFac, to, fn) {
 /* Plot random colored boxes in a canvas periodically.
 */
 +function () {
+  if (location.search) { return; }
   const divisions = 4;
   const canvas = $("#animatedboxes");
 
@@ -118,7 +119,7 @@ function sweepMapRange(delay, from, inc, incFac, to, fn) {
       return [delay, i+1];
     },
     [50, 0]);
-}()
+}();
 
 const acquireAudioContext = function(webAudio) {
   return this[0] = this[0] || webAudio && new webAudio();
@@ -135,7 +136,7 @@ fetch("horn.raw")
   });
 
 function audioHorn () {
-  const ctx = canAudio && acquireAudioContext();
+  const ctx = state.audio && acquireAudioContext();
   if (!ctx || !bufferHorn) { return; }
 
   const gain = ctx.createGain();
@@ -149,7 +150,7 @@ function audioHorn () {
 }
 
 function audioTick () {
-  const ctx = canAudio && acquireAudioContext();
+  const ctx = state.audio && acquireAudioContext();
   if (!ctx) { return; }
 
   const gain = ctx.createGain();
@@ -165,16 +166,27 @@ function audioTick () {
 }
 
 
+function ehToggleScroll () {
+  const el = $("#boardouter");
+  if (state.scrollable = !state.scrollable) {
+    el.style.textWrap = "nowrap";
+  } else {
+    el.style.textWrap = "wrap";
+  }
+  event.target.innerText = state.scrollable?"📜":"📌";
+  sorthem.setScrollable(state.scrollable && $("#board"));
+}
+
 function ehAddPiece () {
   !$("span") && sorthem && sorthem.play();
 }
 
 function ehToggleAudio () {
-  event.target.innerText = (canAudio=!canAudio)?"🔈":"🔇";
+  event.target.innerText = (state.audio=!state.audio)?"🔈":"🔇";
 }
 
 function ehToggleAnimation () {
-  event.target.innerText = (canAnimate=!canAnimate)?"🕺":"🧍";
+  event.target.innerText = (state.animate=!state.animate)?"🕺":"🧍";
 }
 
 
@@ -241,12 +253,20 @@ var sorthem = new class {
       .play()
   }
 
+  setScrollable (el) {
+    this.dropula && this.dropula.setScrollable(el);
+    return this;
+  }
+
+  dropula = null;
+
   play () {
+    this.dropula && this.dropula.shutdown();
     this
       .updateWinnerMarquee(false)
       .addNewPiece()
       .randomizeValues();
-    new Dropula(board)
+    this.dropula = new Dropula(board)
       .animate(true)
       .on('moves', (el)=>{
         const pieces = this.pieces();
@@ -255,12 +275,13 @@ var sorthem = new class {
       .on('shadow', (_el, _container, _source)=>{ audioTick(); })
       .on('dragend', (_el) => {
         if (this.isSolved() && !this.isWinner()) {
-          this.pause = true;
-          canAnimate && (confettiSplosion.start(), audioHorn());
+          this.dropula.shutdown();
+          state.animate && (confettiSplosion.start(), audioHorn());
           this.updateWinnerMarquee(true)
           setTimeout(this.play.bind(this), 2000);
         }
-      });
+      })
+      .setScrollable(state.scrollable && $("#board"));
 
     return this;
   } // Sorthem.play()
